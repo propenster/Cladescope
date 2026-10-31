@@ -1,0 +1,1412 @@
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+
+Item {
+    id: root
+    clip: true
+    focus: true
+
+    // ------------------------------------------------------------------ inputs
+    property var treeData: null
+    property string layoutType: "rectangular"   // rectangular | slanted | circular | radial
+    property bool useBranchLengths: true
+    property string ladderize: "none"           // none | asc | desc
+    property real fontSize: 12
+    property real lineWidth: 1.5
+    property color branchColor: "#333a44"
+    property bool showTips: true
+    property bool alignTips: false
+    property bool showNodeDots: false
+    property bool showScale: true
+    property bool showSupport: false
+    property bool showLengths: false
+    property bool performanceMode: false
+    property bool gpuCanvas: false              // use OpenGL framebuffer canvas
+    property string searchQuery: ""
+    property bool searchRegex: false
+    property bool searchCaseSensitive: false
+    property string colorPattern: ""
+    property bool colorEnabled: false
+    property bool colorBranches: true
+    property string appFont: "sans-serif"
+
+    // ----------------------------------------------------------------- outputs
+    property int matchCount: 0
+    property int categoryCount: 0
+    property string regexError: ""
+    property int leafCount: 0
+    property int nodeCount: 0
+    property int collapsedCount: 0
+    property int lodCount: 0
+    property int pickedCount: 0
+    property string selectionText: ""
+    property bool selIsInternal: false
+    property bool selIsCollapsed: false
+    property int totalTips: 0
+
+    // view transform. x/polar scale = zoomFactor, y scale = zoomFactor * yStretch
+    property real zoomFactor: 1.0
+    property real panX: 0
+    property real panY: 0
+    property real yStretch: 1.0
+    property bool zoomTool: false
+
+    signal renderFinished(int ms, int tips, int nodes)
+    signal notify(string text)
+    signal copyRequested(string text)
+
+    // ---------------------------------------------------------- internal state
+    property var pT: null             // prepared tree (typed arrays)
+    property var pL: null             // cached layout
+    property var vp: ({ cx: 0, cy: 0, bw: 1, bh: 1, R: 1 })
+    property var collapsed: ({})
+    property var cat: null
+    property var matchFlags: null
+    property var matchList: []
+    property int matchCursor: -1
+    property var pickedFlags: null
+    property int selIndex: -1
+    property bool layoutDirty: true
+    property bool firstRenderPending: false
+    property bool announceLayout: false
+    property bool interacting: false
+    property int lastRenderMs: 0
+    property real tgtZoom: 1.0
+    property real tgtPanX: 0
+    property real tgtPanY: 0
+    property real tgtYs: 1.0
+    property var viewHistory: []
+    property bool boxActive: false
+    property real bx0: 0
+    property real by0: 0
+    property real bx1: 0
+    property real by1: 0
+
+    readonly property var palette: [
+        "#2f6fed", "#e83e8c", "#28a745", "#f59f00", "#17a2b8",
+        "#6f42c1", "#fd7e14", "#20c997", "#dc3545", "#8d6e63"
+    ]
+
+    // --------------------------------------------------------- change handling
+    onTreeDataChanged: prepareTree()
+
+    property var _paintDeps: [fontSize, lineWidth, branchColor, showTips, alignTips, showNodeDots,
+                              showScale, showSupport, showLengths, colorBranches, performanceMode,
+                              appFont, zoomFactor, panX, panY, yStretch]
+    on_PaintDepsChanged: canvas.requestPaint()
+
+    property var _layoutDeps: [layoutType, useBranchLengths, ladderize]
+    on_LayoutDepsChanged: {
+        layoutDirty = true
+        if (pT && !firstRenderPending) announceLayout = true
+        canvas.requestPaint()
+    }
+
+    property var _searchDeps: [searchQuery, searchRegex, searchCaseSensitive]
+    on_SearchDepsChanged: { recomputeSearch(); canvas.requestPaint() }
+
+    property var _colorDeps: [colorPattern, colorEnabled]
+    on_ColorDepsChanged: { recomputeCategories(true); canvas.requestPaint() }
+
+    function isPolar() { return pL !== null && (pL.kind === "circular" || pL.kind === "radial") }
+
+    // ------------------------------------------------------------- tree prep
+    function prepareTree() {
+        var d = root.treeData
+        root.collapsed = ({})
+        root.collapsedCount = 0
+        root.selIndex = -1
+        root.pickedFlags = null
+        root.pickedCount = 0
+        root.viewHistory = []
+        root.pL = null
+        root.cat = null
+        refreshSelection()
+        if (!d || !d.count || d.count < 2) {
+            root.pT = null; root.leafCount = 0; root.nodeCount = 0; root.totalTips = 0
+            canvas.requestPaint()
+            return
+        }
+        var n = d.count
+        var parents = d.parents, names = d.names, lens = d.lengths
+        var par = new Int32Array(n), len = new Float64Array(n)
+        var label = new Array(n), children = new Array(n)
+        var support = new Float64Array(n)
+        var hasLen = false
+        var numRe = /^-?\d+(\.\d+)?([eE][-+]?\d+)?$/
+        for (var i = 0; i < n; i++) children[i] = []
+        for (var j = 0; j < n; j++) {
+            par[j] = parents[j]
+            len[j] = lens[j]
+            label[j] = names[j]
+            support[j] = NaN
+            if (len[j] > 0) hasLen = true
+            if (par[j] >= 0) children[par[j]].push(j)
+        }
+        var size = new Int32Array(n), tips = new Int32Array(n)
+        var longest = ""
+        var tipList = []
+        for (var a = n - 1; a >= 0; a--) {
+            size[a] += 1
+            if (children[a].length === 0) {
+                tips[a] = 1
+                tipList.push(a)
+                if (label[a].length > longest.length) longest = label[a]
+            } else if (a > 0 && numRe.test(label[a])) {
+                support[a] = parseFloat(label[a])
+                label[a] = ""
+            }
+            if (par[a] >= 0) { size[par[a]] += size[a]; tips[par[a]] += tips[a] }
+        }
+        tipList.reverse()
+        root.pT = { n: n, par: par, len: len, names: label, children: children, size: size,
+                    tips: tips, support: support, hasLengths: hasLen, longest: longest, tipList: tipList }
+        root.totalTips = tips[0]
+        root.firstRenderPending = true
+        root.layoutDirty = true
+        recomputeSearch()
+        recomputeCategories(false)
+        setView(1, 0, 0, 1)
+        canvas.requestPaint()
+    }
+
+    // ----------------------------------------------------------------- search
+    function recomputeSearch() {
+        root.matchFlags = null
+        root.matchList = []
+        root.matchCursor = -1
+        if (!root.pT || !root.searchQuery) { root.matchCount = 0; return }
+        var re
+        try {
+            var src = root.searchRegex ? root.searchQuery
+                                       : root.searchQuery.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+            re = new RegExp(src, root.searchCaseSensitive ? "" : "i")
+        } catch (e) { root.matchCount = 0; return }
+        var flags = new Uint8Array(root.pT.n), list = []
+        var tl = root.pT.tipList
+        for (var k = 0; k < tl.length; k++) {
+            var idx = tl[k]
+            if (re.test(root.pT.names[idx])) { flags[idx] = 1; list.push(idx) }
+        }
+        root.matchFlags = flags
+        root.matchList = list
+        root.matchCount = list.length
+    }
+
+    function findNext() { stepMatch(1) }
+    function findPrev() { stepMatch(-1) }
+    function stepMatch(dir) {
+        var m = root.matchList
+        if (!m || m.length === 0) return
+        root.matchCursor = (root.matchCursor + dir + m.length) % m.length
+        focusNode(m[root.matchCursor])
+    }
+
+    // --------------------------------------------------------- colour by regex
+    function recomputeCategories(announce) {
+        root.cat = null
+        root.categoryCount = 0
+        root.regexError = ""
+        if (!root.pT || !root.colorEnabled || !root.colorPattern) return
+        var re
+        try { re = new RegExp(root.colorPattern) }
+        catch (e) { root.regexError = "Invalid pattern: " + e.message; return }
+
+        var t = root.pT, n = t.n
+        var keyOf = new Array(n), counts = {}
+        for (var k = 0; k < t.tipList.length; k++) {
+            var idx = t.tipList[k]
+            var m = re.exec(t.names[idx])
+            if (!m) continue
+            var key = (m.length > 1 && m[1] !== undefined) ? m[1] : m[0]
+            if (key === "") continue
+            keyOf[idx] = key
+            counts[key] = (counts[key] || 0) + 1
+        }
+        var labels = Object.keys(counts)
+        labels.sort(function (a, b) {
+            var na = parseFloat(a), nb = parseFloat(b)
+            if (!isNaN(na) && !isNaN(nb) && na !== nb) return na - nb
+            return a < b ? -1 : (a > b ? 1 : 0)
+        })
+        var colors = [], cnt = [], index = {}
+        for (var c = 0; c < labels.length; c++) {
+            colors.push(labels.length <= root.palette.length
+                        ? root.palette[c]
+                        : Qt.hsla((c / labels.length) * 0.85, 0.68, 0.46, 1).toString())
+            cnt.push(counts[labels[c]])
+            index[labels[c]] = c
+        }
+        var nodeCat = new Int32Array(n).fill(-1)
+        for (var q = n - 1; q >= 0; q--) {
+            var ch = t.children[q]
+            if (ch.length === 0) {
+                if (keyOf[q] !== undefined) nodeCat[q] = index[keyOf[q]]
+            } else {
+                var c0 = nodeCat[ch[0]], ok = c0 >= 0
+                for (var z = 1; ok && z < ch.length; z++) if (nodeCat[ch[z]] !== c0) ok = false
+                nodeCat[q] = ok ? c0 : -1
+            }
+        }
+        root.cat = { labels: labels, colors: colors, counts: cnt, nodeCat: nodeCat }
+        root.categoryCount = labels.length
+        if (announce && labels.length > 0)
+            root.notify("Colored by pattern · " + labels.length + " categories")
+    }
+
+    // ------------------------------------------------- selection / label picking
+    function refreshSelection() {
+        if (!root.pT || root.selIndex < 0) {
+            root.selectionText = ""; root.selIsInternal = false; root.selIsCollapsed = false
+            return
+        }
+        var i = root.selIndex, t = root.pT
+        var internal = t.children[i].length > 0
+        root.selIsInternal = internal && i > 0
+        root.selIsCollapsed = root.collapsed[i] === true
+        var nm = t.names[i]
+        root.selectionText = internal ? ((nm ? nm + " · " : "Clade · ") + t.tips[i] + " tips")
+                                      : (nm || "tip")
+    }
+    function clearSelection() { root.selIndex = -1; refreshSelection(); canvas.requestPaint() }
+    function clearPicked() {
+        if (root.pickedCount === 0) return
+        root.pickedFlags = null
+        root.pickedCount = 0
+        canvas.requestPaint()
+    }
+    function clearAll() {
+        root.selIndex = -1
+        refreshSelection()
+        clearPicked()
+        canvas.requestPaint()
+    }
+    function selectParent() {
+        if (root.selIndex > 0) { root.selIndex = root.pT.par[root.selIndex]; refreshSelection(); canvas.requestPaint() }
+    }
+    function toggleSelected() {
+        if (root.selIndex <= 0 || !root.selIsInternal) return
+        if (root.collapsed[root.selIndex] === true) delete root.collapsed[root.selIndex]
+        else root.collapsed[root.selIndex] = true
+        root.collapsedCount = Object.keys(root.collapsed).length
+        root.layoutDirty = true
+        refreshSelection()
+        canvas.requestPaint()
+    }
+    function expandAll() {
+        root.collapsed = ({})
+        root.collapsedCount = 0
+        root.layoutDirty = true
+        refreshSelection()
+        canvas.requestPaint()
+    }
+
+    function ensurePicked() {
+        if (!root.pickedFlags || root.pickedFlags.length !== root.pT.n)
+            root.pickedFlags = new Uint8Array(root.pT.n)
+    }
+    function togglePick(i) {
+        ensurePicked()
+        if (root.pickedFlags[i]) { root.pickedFlags[i] = 0; root.pickedCount-- }
+        else { root.pickedFlags[i] = 1; root.pickedCount++ }
+        canvas.requestPaint()
+    }
+    function pickClade(i) {
+        ensurePicked()
+        var t = root.pT, end = i + t.size[i], tl = t.tipList, added = 0
+        for (var k = 0; k < tl.length; k++) {
+            var idx = tl[k]
+            if (idx >= i && idx < end && !root.pickedFlags[idx]) { root.pickedFlags[idx] = 1; added++ }
+        }
+        root.pickedCount += added
+        canvas.requestPaint()
+    }
+    function pickOnly(i) {
+        root.pickedFlags = null
+        root.pickedCount = 0
+        togglePick(i)
+    }
+    function pickMatches() {
+        if (!root.pT || root.matchList.length === 0) return
+        root.pickedFlags = null
+        root.pickedCount = 0
+        ensurePicked()
+        for (var k = 0; k < root.matchList.length; k++) root.pickedFlags[root.matchList[k]] = 1
+        root.pickedCount = root.matchList.length
+        canvas.requestPaint()
+    }
+
+    function copyLabels() {
+        if (!root.pT) return
+        var t = root.pT, out = [], tl = t.tipList
+        if (root.pickedCount > 0) {
+            for (var k = 0; k < tl.length; k++) if (root.pickedFlags[tl[k]]) out.push(t.names[tl[k]])
+        } else if (root.selIndex >= 0) {
+            var i = root.selIndex
+            if (t.children[i].length === 0) out.push(t.names[i])
+            else {
+                var end = i + t.size[i]
+                for (var k2 = 0; k2 < tl.length; k2++) if (tl[k2] >= i && tl[k2] < end) out.push(t.names[tl[k2]])
+            }
+        }
+        if (out.length === 0) return
+        root.copyRequested(out.join("\n"))
+        root.notify("Copied " + out.length + (out.length === 1 ? " label" : " labels"))
+    }
+    function copyMatches() {
+        if (!root.pT || root.matchList.length === 0) return
+        var out = []
+        for (var k = 0; k < root.matchList.length; k++) out.push(root.pT.names[root.matchList[k]])
+        root.copyRequested(out.join("\n"))
+        root.notify("Copied " + out.length + " matching labels")
+    }
+
+    // ---- hit testing (tip labels first, then nodes)
+    function labelAnchor(i, out) {
+        var Lr = root.pL, v = root.vp, z = root.zoomFactor, kind = Lr.kind
+        var a = (kind === "circular" || kind === "radial") ? Lr.ANG[i] : 0
+        var ax = Lr.PX[i], ay = Lr.PY[i]
+        if (root.alignTips && kind !== "radial") {
+            if (kind === "circular") {
+                var zr = v.R * z
+                ax = v.cx + root.panX + zr * Math.cos(a)
+                ay = v.cy + root.panY + zr * Math.sin(a)
+            } else ax = v.cx + root.panX + 0.5 * v.bw * z
+        }
+        out.a = a
+        out.x = ax + Math.cos(a) * 6
+        out.y = ay + Math.sin(a) * 6
+    }
+
+    function hitTest(x, y) {
+        var Lr = root.pL, t = root.pT
+        var res = { idx: -1, label: false }
+        if (!Lr || !t) return res
+        var vis = Lr.vis, ch = t.children, fs = root.fontSize
+        var polar = isPolar()
+        var rowPx = polar ? (2 * Math.PI * root.vp.R * root.zoomFactor) / Math.max(Lr.leafCount, 1)
+                          : (root.vp.bh * root.zoomFactor * root.yStretch) / Math.max(Lr.leafCount - 1, 1)
+        var thin = Math.max(1, Math.ceil(fs * 1.1 / Math.max(rowPx, 0.01)))
+        var anc = { a: 0, x: 0, y: 0 }
+
+        if (root.showTips || root.matchFlags) {
+            for (var k = 0; k < vis.length; k++) {
+                var i = vis[k]
+                if (ch[i].length !== 0) continue
+                var special = (root.matchFlags && root.matchFlags[i] === 1) || (root.pickedFlags && root.pickedFlags[i] === 1)
+                if (!root.showTips && !special) continue
+                if (!special && ((thin > 1 && (Lr.Y[i] % thin) !== 0) || Lr.lod[i] === 1)) continue
+                var nm = t.names[i]
+                if (!nm) continue
+                labelAnchor(i, anc)
+                var dx = x - anc.x, dy = y - anc.y
+                if (Math.abs(dx) > 700 || Math.abs(dy) > 700) continue
+                var ca = Math.cos(anc.a), sa = Math.sin(anc.a)
+                var along = dx * ca + dy * sa, perp = -dx * sa + dy * ca
+                if (Math.abs(perp) > fs * 0.65 + 2 || along < -4) continue
+                tm.text = nm
+                if (along <= tm.width + 4) { res.idx = i; res.label = true; return res }
+            }
+        }
+        var best = -1, bd = 14 * 14
+        for (var k2 = 0; k2 < vis.length; k2++) {
+            var j = vis[k2]
+            if (Lr.lod[j] === 1) continue
+            var ddx = Lr.PX[j] - x, ddy = Lr.PY[j] - y
+            var d = ddx * ddx + ddy * ddy
+            if (d < bd) { bd = d; best = j }
+        }
+        res.idx = best
+        return res
+    }
+
+    // kind: "plain" | "double" | "additive"
+    function handleTap(x, y, kind) {
+        if (!root.pL || !root.pT) return
+        var h = hitTest(x, y), i = h.idx, t = root.pT
+        var isTip = i >= 0 && t.children[i].length === 0
+        if (kind === "plain") {
+            clearPicked()
+            root.selIndex = i
+            refreshSelection()
+            canvas.requestPaint()
+        } else if (kind === "double") {
+            if (i < 0) return
+            if (isTip) { root.selIndex = i; refreshSelection(); pickOnly(i) }
+            else if (i > 0) { root.selIndex = i; refreshSelection(); toggleSelected() }
+        } else {
+            if (i < 0) return
+            if (isTip) togglePick(i)
+            else pickClade(i)
+        }
+    }
+
+    // --------------------------------------------------------------- view ops
+    function pushHistory() {
+        var h = root.viewHistory.slice(-19)
+        h.push({ z: root.zoomFactor, px: root.panX, py: root.panY, ys: root.yStretch })
+        root.viewHistory = h
+    }
+    function zoomBack() {
+        var h = root.viewHistory.slice()
+        if (h.length === 0) return
+        var s = h.pop()
+        root.viewHistory = h
+        animateView(s.z, s.px, s.py, s.ys)
+    }
+    function setView(z, px, py, ys) {
+        viewAnim.stop()
+        root.zoomFactor = z; root.panX = px; root.panY = py; root.yStretch = ys
+        root.tgtZoom = z; root.tgtPanX = px; root.tgtPanY = py; root.tgtYs = ys
+    }
+    function animateView(z, px, py, ys) {
+        viewAnim.stop()
+        var y2 = (ys === undefined) ? root.yStretch : ys
+        root.tgtZoom = z; root.tgtPanX = px; root.tgtPanY = py; root.tgtYs = y2
+        aZoom.to = z; aPx.to = px; aPy.to = py; aYs.to = y2
+        viewAnim.start()
+    }
+    function fitView() { pushHistory(); animateView(1.0, 0, 0, 1.0) }
+
+    // fx/fy: multiplicative zoom on x and y (polar layouts always use fx)
+    function zoomAboutXY(mx, my, fx, fy) {
+        var polar = isPolar()
+        var nz = Math.max(0.05, Math.min(400, root.tgtZoom * fx))
+        var kx = nz / root.tgtZoom
+        var nys = root.tgtYs, ky = kx
+        if (!polar) {
+            nys = Math.max(0.02, Math.min(20000, root.tgtYs * fy / kx))
+            ky = (nz * nys) / (root.tgtZoom * root.tgtYs)
+        }
+        var ox = mx - root.vp.cx, oy = my - root.vp.cy
+        animateView(nz, ox - (ox - root.tgtPanX) * kx, oy - (oy - root.tgtPanY) * ky, nys)
+    }
+    function zoomAbout(mx, my, f) { zoomAboutXY(mx, my, f, f) }
+
+    // Zoom so that the screen rectangle fills the view
+    function zoomToRect(x0, y0, x1, y1) {
+        var w = Math.abs(x1 - x0), h = Math.abs(y1 - y0)
+        if (w < 10 || h < 10 || !root.pL) return
+        var rx = (x0 + x1) / 2, ry = (y0 + y1) / 2
+        var z = root.zoomFactor, ys = root.yStretch
+        var kx = root.width / w, ky = root.height / h
+        var polar = isPolar()
+        if (polar) { kx = Math.min(kx, ky) }
+        var nz = Math.min(400, z * kx)
+        kx = nz / z
+        var nys = ys, kyEff = kx
+        if (!polar) {
+            nys = Math.max(0.02, Math.min(20000, ys * ky / kx))
+            kyEff = (nz * nys) / (z * ys)
+        }
+        pushHistory()
+        animateView(nz,
+                    root.width / 2 - root.vp.cx - (rx - root.vp.cx - root.panX) * kx,
+                    root.height / 2 - root.vp.cy - (ry - root.vp.cy - root.panY) * kyEff,
+                    nys)
+    }
+
+    // One row of tips per ~1.3x font height (the "readable" view for huge trees)
+    function readableRows() {
+        if (!root.pL) return
+        pushHistory()
+        var target = root.fontSize * 1.3
+        if (isPolar()) {
+            var zNeeded = target * Math.max(root.pL.leafCount, 1) / (2 * Math.PI * root.vp.R)
+            animateView(Math.min(400, Math.max(1, zNeeded)), 0, 0, 1)
+            return
+        }
+        var rows = Math.max(root.pL.leafCount - 1, 1)
+        var ys = target * rows / (root.vp.bh * root.zoomFactor)
+        if (ys <= 1.0) { animateView(root.zoomFactor, 0, 0, 1); return }
+        ys = Math.min(20000, ys)
+        var tot = root.vp.bh * root.zoomFactor * ys
+        animateView(root.zoomFactor, root.panX, 28 - root.vp.cy + 0.5 * tot, ys)
+    }
+
+    function focusNode(idx) {
+        if (!root.pT) return
+        var changed = false, p = root.pT.par[idx]
+        while (p >= 0) {
+            if (root.collapsed[p] === true) { delete root.collapsed[p]; changed = true }
+            p = root.pT.par[p]
+        }
+        if (changed) { root.collapsedCount = Object.keys(root.collapsed).length; root.layoutDirty = true }
+        if (root.layoutDirty || !root.pL) computeLayout()
+        project()
+        var Lr = root.pL, z = root.zoomFactor, nz = z
+        var polar = isPolar()
+        if (!polar) {
+            var rowPx = root.vp.bh * z * root.yStretch / Math.max(Lr.leafCount - 1, 1)
+            if (rowPx < 16) nz = Math.min(400, z * Math.pow(16 / Math.max(rowPx, 0.001), 0.5))
+        } else if (z < 4 && Lr.leafCount > 60) nz = 4
+        var kx = nz / z
+        var nys = root.yStretch
+        var ky = kx
+        if (!polar) {
+            // bring rows up to ~16px, splitting the effort between x and y
+            var rp = root.vp.bh * z * root.yStretch / Math.max(Lr.leafCount - 1, 1)
+            var wantTotal = Math.max(1, 16 / Math.max(rp, 0.001))
+            nys = Math.min(20000, root.yStretch * wantTotal / kx)
+            ky = (nz * nys) / (z * root.yStretch)
+        }
+        var offX = Lr.PX[idx] - root.vp.cx - root.panX
+        var offY = Lr.PY[idx] - root.vp.cy - root.panY
+        root.selIndex = idx
+        refreshSelection()
+        animateView(nz, root.width / 2 - root.vp.cx - offX * kx,
+                    root.height / 2 - root.vp.cy - offY * ky, nys)
+        canvas.requestPaint()
+    }
+    function exportImage(path) { return canvas.save(path) }
+
+    // ------------------------------------------------------------------ layout
+    function computeLayout() {
+        var t = root.pT, n = t.n, par = t.par, ch = t.children, col = root.collapsed
+        var vis = [], mask = new Uint8Array(n)
+        var i = 0
+        while (i < n) {
+            vis.push(i); mask[i] = 1
+            if (col[i] === true && ch[i].length > 0) i += t.size[i]; else i++
+        }
+        var m = vis.length
+        function isTipV(idx) { return ch[idx].length === 0 || col[idx] === true }
+        function ordered(idx) {
+            var c = ch[idx]
+            if (root.ladderize === "none" || c.length < 2) return c
+            var s = c.slice(), dir = root.ladderize === "asc" ? 1 : -1
+            s.sort(function (a, b) { return dir * (t.tips[a] - t.tips[b]) })
+            return s
+        }
+
+        // rows
+        var Y = new Float64Array(n), leaves = 0, stack = [0]
+        while (stack.length) {
+            var s0 = stack.pop()
+            if (isTipV(s0)) Y[s0] = leaves++
+            else { var oc = ordered(s0); for (var k = oc.length - 1; k >= 0; k--) stack.push(oc[k]) }
+        }
+        var Ymin = new Float64Array(n), Ymax = new Float64Array(n)
+        for (var a = m - 1; a >= 0; a--) {
+            var idx = vis[a]
+            if (!isTipV(idx)) {
+                var c = ch[idx], mn = Infinity, mx = -Infinity
+                for (var b = 0; b < c.length; b++) {
+                    var yy = Y[c[b]]
+                    if (yy < mn) mn = yy
+                    if (yy > mx) mx = yy
+                    if (Ymin[c[b]] < Ymin[idx] || b === 0) Ymin[idx] = Ymin[c[b]]
+                    if (Ymax[c[b]] > Ymax[idx] || b === 0) Ymax[idx] = Ymax[c[b]]
+                }
+                Y[idx] = (mn + mx) / 2
+            } else { Ymin[idx] = Y[idx]; Ymax[idx] = Y[idx] }
+        }
+
+        // depth (phylogram) or aligned height (cladogram)
+        var useLen = root.useBranchLengths && t.hasLengths
+        var depth = new Float64Array(n), maxDepth = 0
+        if (useLen) {
+            for (var a2 = 1; a2 < m; a2++) {
+                var q = vis[a2]
+                depth[q] = depth[par[q]] + t.len[q]
+                if (depth[q] > maxDepth) maxDepth = depth[q]
+            }
+        } else {
+            var hgt = new Float64Array(n)
+            for (var a3 = m - 1; a3 >= 0; a3--) {
+                var q2 = vis[a3]
+                if (!isTipV(q2)) {
+                    var cc = ch[q2], h = 0
+                    for (var b2 = 0; b2 < cc.length; b2++) h = Math.max(h, hgt[cc[b2]] + 1)
+                    hgt[q2] = h
+                }
+            }
+            maxDepth = hgt[0]
+            for (var a4 = 0; a4 < m; a4++) depth[vis[a4]] = maxDepth - hgt[vis[a4]]
+        }
+        if (!(maxDepth > 0)) maxDepth = 1
+
+        // deepest descendant (normalised) -- used for LOD wedges
+        var Dmax = new Float64Array(n)
+        for (var a11 = m - 1; a11 >= 0; a11--) {
+            var q9 = vis[a11], dm = depth[q9] / maxDepth
+            if (!isTipV(q9)) {
+                var c9 = ch[q9]
+                for (var b9 = 0; b9 < c9.length; b9++) if (Dmax[c9[b9]] > dm) dm = Dmax[c9[b9]]
+            }
+            Dmax[q9] = dm
+        }
+
+        var kind = root.layoutType
+        if (kind !== "slanted" && kind !== "circular" && kind !== "radial") kind = "rectangular"
+        var U = new Float64Array(n), V = new Float64Array(n)
+        var ANG = new Float64Array(n), RAD = new Float64Array(n)
+        var half = 1
+
+        if (kind === "circular") {
+            for (var a5 = 0; a5 < m; a5++) {
+                var q3 = vis[a5]
+                RAD[q3] = depth[q3] / maxDepth
+                ANG[q3] = (Y[q3] / Math.max(leaves, 1)) * 2 * Math.PI - Math.PI / 2
+                U[q3] = RAD[q3] * Math.cos(ANG[q3])
+                V[q3] = RAD[q3] * Math.sin(ANG[q3])
+            }
+        } else if (kind === "radial") {
+            var lw = new Float64Array(n)
+            for (var a6 = m - 1; a6 >= 0; a6--) {
+                var q4 = vis[a6]
+                if (isTipV(q4)) lw[q4] = 1
+                else { var sum = 0, c4 = ch[q4]; for (var b4 = 0; b4 < c4.length; b4++) sum += lw[c4[b4]]; lw[q4] = sum }
+            }
+            var a0 = new Float64Array(n), a1 = new Float64Array(n)
+            var X = new Float64Array(n), Yp = new Float64Array(n)
+            a1[0] = 2 * Math.PI
+            for (var a7 = 0; a7 < m; a7++) {
+                var q5 = vis[a7]
+                if (isTipV(q5)) continue
+                var oc5 = ordered(q5), span = a1[q5] - a0[q5], curA = a0[q5]
+                for (var b5 = 0; b5 < oc5.length; b5++) {
+                    var cn = oc5[b5]
+                    a0[cn] = curA
+                    curA += span * lw[cn] / lw[q5]
+                    a1[cn] = curA
+                    ANG[cn] = (a0[cn] + a1[cn]) / 2
+                    var el = useLen ? t.len[cn] : 1
+                    X[cn] = X[q5] + el * Math.cos(ANG[cn])
+                    Yp[cn] = Yp[q5] + el * Math.sin(ANG[cn])
+                }
+            }
+            var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+            for (var a8 = 0; a8 < m; a8++) {
+                var q6 = vis[a8]
+                if (X[q6] < minX) minX = X[q6]
+                if (X[q6] > maxX) maxX = X[q6]
+                if (Yp[q6] < minY) minY = Yp[q6]
+                if (Yp[q6] > maxY) maxY = Yp[q6]
+            }
+            half = Math.max(maxX - minX, maxY - minY) / 2
+            if (!(half > 0)) half = 1
+            var mx0 = (minX + maxX) / 2, my0 = (minY + maxY) / 2
+            for (var a9 = 0; a9 < m; a9++) {
+                var q7 = vis[a9]
+                U[q7] = (X[q7] - mx0) / half
+                V[q7] = (Yp[q7] - my0) / half
+            }
+        } else {
+            var rows = Math.max(leaves - 1, 1)
+            for (var a10 = 0; a10 < m; a10++) {
+                var q8 = vis[a10]
+                U[q8] = depth[q8] / maxDepth
+                V[q8] = Y[q8] / rows
+            }
+        }
+
+        root.pL = { kind: kind, vis: vis, visMask: mask, U: U, V: V, Y: Y, ANG: ANG, RAD: RAD,
+                    Ymin: Ymin, Ymax: Ymax, Dmax: Dmax, lod: new Uint8Array(n),
+                    PX: new Float64Array(n), PY: new Float64Array(n),
+                    leafCount: leaves, maxDepth: maxDepth, useLen: useLen, half: half }
+        root.leafCount = leaves
+        root.nodeCount = m
+        root.layoutDirty = false
+    }
+
+    function fontStr(px) {
+        var f = root.appFont
+        return Math.max(1, Math.round(px)) + "px " + ((f === "sans-serif" || f === "") ? "sans-serif" : "'" + f + "'")
+    }
+
+    function updateViewport(ctx, w, h) {
+        ctx.font = fontStr(root.fontSize)
+        var lw = 0
+        if (root.showTips && root.pT.longest) lw = Math.min(ctx.measureText(root.pT.longest).width + 14, w * 0.3)
+        var pad = 28, v = root.vp
+        if (root.pL.kind === "circular" || root.pL.kind === "radial") {
+            v.cx = w / 2; v.cy = h / 2
+            v.R = Math.max(30, Math.min(w, h) / 2 - pad - lw)
+        } else {
+            v.bw = Math.max(60, w - 2 * pad - lw)
+            v.bh = Math.max(60, h - 2 * pad)
+            v.cx = pad + v.bw / 2
+            v.cy = pad + v.bh / 2
+        }
+    }
+
+    function project() {
+        var Lr = root.pL, v = root.vp, z = root.zoomFactor
+        var vis = Lr.vis, U = Lr.U, V = Lr.V, PX = Lr.PX, PY = Lr.PY
+        var px = root.panX, py = root.panY
+        if (Lr.kind === "circular" || Lr.kind === "radial") {
+            var s = v.R * z
+            for (var k = 0; k < vis.length; k++) {
+                var i = vis[k]
+                PX[i] = v.cx + px + U[i] * s
+                PY[i] = v.cy + py + V[i] * s
+            }
+        } else {
+            var sx = v.bw * z, sy = v.bh * z * root.yStretch
+            for (var k2 = 0; k2 < vis.length; k2++) {
+                var i2 = vis[k2]
+                PX[i2] = v.cx + px + (U[i2] - 0.5) * sx
+                PY[i2] = v.cy + py + (V[i2] - 0.5) * sy
+            }
+        }
+    }
+
+    function layoutName() {
+        var n = { rectangular: "Rectangular", slanted: "Slanted", circular: "Circular", radial: "Radial" }[root.layoutType]
+        return (n || "Rectangular") + (root.useBranchLengths && root.pT && root.pT.hasLengths ? " phylogram" : " cladogram")
+    }
+
+    // ----------------------------------------------------------------- drawing
+    function drawTree(ctx, w, h) {
+        var Lr = root.pL, t = root.pT, v = root.vp, cat = root.cat
+        var vis = Lr.vis, PX = Lr.PX, PY = Lr.PY, par = t.par, ch = t.children, col = root.collapsed
+        var kind = Lr.kind
+        var polar = (kind === "circular" || kind === "radial")
+        var fs = root.fontSize, z = root.zoomFactor
+        var lite = root.interacting && (root.performanceMode || Lr.leafCount > 4000)
+        var branchStr = root.branchColor.toString()
+        var zr = polar ? v.R * z : 0
+        var ccx = v.cx + root.panX, ccy = v.cy + root.panY
+        var rowPx = polar ? (2 * Math.PI * zr) / Math.max(Lr.leafCount, 1)
+                          : (v.bh * z * root.yStretch) / Math.max(Lr.leafCount - 1, 1)
+        var alignX = v.cx + root.panX + 0.5 * v.bw * z
+        var align = root.alignTips && kind !== "radial"
+        var pxUnit = 0
+        if (Lr.useLen) pxUnit = kind === "circular" ? zr / Lr.maxDepth
+                              : (kind === "radial" ? zr / Lr.half : v.bw * z / Lr.maxDepth)
+        var sel = root.selIndex, selEnd = sel >= 0 ? sel + t.size[sel] : -1
+        var match = root.matchFlags, pk = root.pickedFlags
+        var lineW = root.lineWidth
+        var lod = Lr.lod
+
+        function trace(i) {
+            var a = par[i], x0 = PX[a], y0 = PY[a], x1 = PX[i], y1 = PY[i]
+            if (kind === "circular") {
+                var an = Lr.ANG[i], ap = Lr.ANG[a], rp = Lr.RAD[a] * zr, ri = Lr.RAD[i] * zr
+                ctx.moveTo(ccx + rp * Math.cos(ap), ccy + rp * Math.sin(ap))
+                if (rp > 0.5 && an !== ap) ctx.arc(ccx, ccy, rp, ap, an, an < ap)
+                ctx.lineTo(ccx + ri * Math.cos(an), ccy + ri * Math.sin(an))
+                return
+            }
+            if (Math.max(x0, x1) < -8 || Math.min(x0, x1) > w + 8
+                    || Math.max(y0, y1) < -8 || Math.min(y0, y1) > h + 8) return
+            ctx.moveTo(x0, y0)
+            if (kind === "rectangular") { ctx.lineTo(x0, y1); ctx.lineTo(x1, y1) }
+            else ctx.lineTo(x1, y1)
+        }
+        function inView(x, y, m) { return x > -m && x < w + m && y > -m && y < h + m }
+
+        // ---- level of detail: clades thinner than ~2px become one solid wedge
+        lod.fill(0)
+        var lodList = []
+        if (kind !== "radial") {
+            var lk = 0, lodPx = 2.2
+            while (lk < vis.length) {
+                var li0 = vis[lk]
+                if (li0 !== 0 && ch[li0].length > 0 && col[li0] !== true) {
+                    var span = Lr.Ymax[li0] - Lr.Ymin[li0]
+                    var ext = polar ? (span / Math.max(Lr.leafCount, 1)) * 2 * Math.PI * Math.max(Lr.Dmax[li0], 0.02) * zr
+                                    : span * rowPx
+                    if (ext < lodPx) {
+                        lodList.push(li0)
+                        var endIdx = li0 + t.size[li0]
+                        lk++
+                        while (lk < vis.length && vis[lk] < endIdx) { lod[vis[lk]] = 1; lk++ }
+                        continue
+                    }
+                }
+                lk++
+            }
+        }
+        root.lodCount = lodList.length
+
+        ctx.lineCap = "round"
+        ctx.lineJoin = "round"
+
+        // ---- alignment guides
+        if (align && !lite) {
+            ctx.beginPath()
+            ctx.strokeStyle = "#d7dce2"
+            ctx.lineWidth = 1
+            for (var g = 0; g < vis.length; g++) {
+                var gi = vis[g]
+                if (ch[gi].length !== 0 || lod[gi]) continue
+                var tx = PX[gi], ty = PY[gi], ex, ey
+                if (kind === "circular") { ex = ccx + zr * Math.cos(Lr.ANG[gi]); ey = ccy + zr * Math.sin(Lr.ANG[gi]) }
+                else { ex = alignX; ey = ty }
+                if (Math.abs(ex - tx) + Math.abs(ey - ty) < 3) continue
+                if (!inView(tx, ty, 40) && !inView(ex, ey, 40)) continue
+                ctx.moveTo(tx, ty); ctx.lineTo(ex, ey)
+            }
+            ctx.stroke()
+        }
+
+        // ---- edges, batched per colour
+        var buckets = {}, keys = []
+        for (var k = 1; k < vis.length; k++) {
+            var i = vis[k]
+            if (lod[i]) continue
+            var colr = branchStr
+            if (cat) {
+                var cc = cat.nodeCat[i]
+                if (cc >= 0 && (root.colorBranches || ch[i].length === 0 || col[i] === true)) colr = cat.colors[cc]
+            }
+            if (!buckets[colr]) { buckets[colr] = []; keys.push(colr) }
+            buckets[colr].push(i)
+        }
+        ctx.lineWidth = lineW
+        for (var b = 0; b < keys.length; b++) {
+            var list = buckets[keys[b]]
+            ctx.beginPath()
+            ctx.strokeStyle = keys[b]
+            for (var e = 0; e < list.length; e++) trace(list[e])
+            ctx.stroke()
+        }
+
+        // ---- LOD wedges (batched per colour)
+        if (lodList.length > 0) {
+            var gb = {}, gk = []
+            for (var gq = 0; gq < lodList.length; gq++) {
+                var gn = lodList[gq]
+                var gcol = "#7a8591"
+                if (cat && cat.nodeCat[gn] >= 0) gcol = cat.colors[cat.nodeCat[gn]]
+                if (!gb[gcol]) { gb[gcol] = []; gk.push(gcol) }
+                gb[gcol].push(gn)
+            }
+            ctx.globalAlpha = 0.85
+            for (var gc = 0; gc < gk.length; gc++) {
+                var gl = gb[gk[gc]]
+                ctx.beginPath()
+                ctx.fillStyle = gk[gc]
+                for (var gj = 0; gj < gl.length; gj++) {
+                    var gx = gl[gj]
+                    if (kind === "circular") {
+                        var ga = Lr.ANG[gx]
+                        var r0 = Lr.RAD[gx] * zr, r1 = Math.max(Lr.Dmax[gx] * zr, r0 + 1)
+                        var gspan = ((Lr.Ymax[gx] - Lr.Ymin[gx]) / Math.max(Lr.leafCount, 1)) * Math.PI + 0.3 / Math.max(r1, 1)
+                        var c1 = Math.cos(ga - gspan), s1 = Math.sin(ga - gspan)
+                        var c2 = Math.cos(ga + gspan), s2 = Math.sin(ga + gspan)
+                        ctx.moveTo(ccx + r0 * c1, ccy + r0 * s1)
+                        ctx.lineTo(ccx + r1 * c1, ccy + r1 * s1)
+                        ctx.lineTo(ccx + r1 * c2, ccy + r1 * s2)
+                        ctx.lineTo(ccx + r0 * c2, ccy + r0 * s2)
+                        ctx.closePath()
+                    } else {
+                        var gx0 = PX[gx], gy = PY[gx]
+                        var gx1 = v.cx + root.panX + (Lr.Dmax[gx] - 0.5) * v.bw * z
+                        var gh = Math.max((Lr.Ymax[gx] - Lr.Ymin[gx]) * rowPx / 2, 0.6)
+                        if (gy < -10 || gy > h + 10 || gx1 < -10 || gx0 > w + 10) continue
+                        ctx.rect(gx0, gy - gh, Math.max(gx1 - gx0, 1), gh * 2)
+                    }
+                }
+                ctx.fill()
+            }
+            ctx.globalAlpha = 1
+        }
+
+        // ---- selected clade
+        if (sel >= 0 && Lr.visMask[sel] && !lod[sel]) {
+            ctx.beginPath()
+            ctx.strokeStyle = "#2f6fed"
+            ctx.lineWidth = lineW + 1.5
+            for (var s = 0; s < vis.length; s++) {
+                var si = vis[s]
+                if (si >= sel && si < selEnd && si > 0 && !lod[si]) trace(si)
+            }
+            ctx.stroke()
+        }
+
+        // ---- collapsed clades as triangles
+        for (var c = 0; c < vis.length; c++) {
+            var ci = vis[c]
+            if (col[ci] !== true || ch[ci].length === 0 || lod[ci]) continue
+            var cx0 = PX[ci], cy0 = PY[ci]
+            if (!inView(cx0, cy0, 80)) continue
+            var ang = polar ? Lr.ANG[ci] : 0
+            var halfH = polar ? 9 : Math.max(5, Math.min(rowPx * 0.42, 60))
+            var dx = Math.cos(ang), dy = Math.sin(ang), nx = -dy, ny = dx, tl = 26
+            ctx.beginPath()
+            ctx.moveTo(cx0, cy0)
+            ctx.lineTo(cx0 + dx * tl + nx * halfH, cy0 + dy * tl + ny * halfH)
+            ctx.lineTo(cx0 + dx * tl - nx * halfH, cy0 + dy * tl - ny * halfH)
+            ctx.closePath()
+            var tcol = "#8b96a3"
+            if (cat && cat.nodeCat[ci] >= 0) tcol = cat.colors[cat.nodeCat[ci]]
+            ctx.globalAlpha = 0.85
+            ctx.fillStyle = tcol
+            ctx.fill()
+            ctx.globalAlpha = 1
+        }
+
+        // ---- internal node dots
+        if (root.showNodeDots && !lite) {
+            ctx.beginPath()
+            ctx.fillStyle = branchStr
+            for (var d = 1; d < vis.length; d++) {
+                var di = vis[d]
+                if (ch[di].length === 0 || col[di] === true || lod[di]) continue
+                if (!inView(PX[di], PY[di], 4)) continue
+                ctx.moveTo(PX[di] + 2.6, PY[di])
+                ctx.arc(PX[di], PY[di], 2.6, 0, Math.PI * 2)
+            }
+            ctx.fill()
+        }
+
+        // ---- support values and branch lengths
+        if ((root.showSupport || root.showLengths) && !lite && !root.performanceMode) {
+            ctx.font = fontStr(Math.max(8, fs - 2))
+            ctx.fillStyle = "#6b7480"
+            for (var u = 1; u < vis.length; u++) {
+                var ui = vis[u]
+                if (lod[ui]) continue
+                var x1 = PX[ui], y1 = PY[ui]
+                if (!inView(x1, y1, 30)) continue
+                if (root.showSupport && t.support[ui] === t.support[ui] && ch[ui].length > 0 && col[ui] !== true) {
+                    var st = String(Math.round(t.support[ui] * 100) / 100)
+                    ctx.textAlign = "right"; ctx.textBaseline = "bottom"
+                    ctx.fillText(st, x1 - 3, y1 - 2)
+                }
+                if (root.showLengths && t.len[ui] > 0) {
+                    var lt = String(parseFloat(t.len[ui].toPrecision(3)))
+                    var p = par[ui], mxx, myy, segPx
+                    if (kind === "circular") {
+                        var rm = (Lr.RAD[p] + Lr.RAD[ui]) / 2 * zr
+                        mxx = ccx + rm * Math.cos(Lr.ANG[ui]); myy = ccy + rm * Math.sin(Lr.ANG[ui])
+                        segPx = (Lr.RAD[ui] - Lr.RAD[p]) * zr
+                    } else if (kind === "rectangular") {
+                        mxx = (PX[p] + x1) / 2; myy = y1 - 2; segPx = x1 - PX[p]
+                    } else {
+                        mxx = (PX[p] + x1) / 2; myy = (PY[p] + y1) / 2 - 2
+                        segPx = Math.sqrt((x1 - PX[p]) * (x1 - PX[p]) + (y1 - PY[p]) * (y1 - PY[p]))
+                    }
+                    if (segPx > lt.length * fs * 0.55 + 6) {
+                        ctx.textAlign = "center"; ctx.textBaseline = "bottom"
+                        ctx.fillText(lt, mxx, myy)
+                    }
+                }
+            }
+        }
+
+        // ---- search match rings (always visible, even when labels are thinned out)
+        if (match && root.matchList.length > 0) {
+            ctx.beginPath()
+            ctx.fillStyle = "#ffd54a"
+            ctx.strokeStyle = "#b58900"
+            ctx.lineWidth = 1
+            for (var mi = 0; mi < root.matchList.length; mi++) {
+                var mIdx = root.matchList[mi]
+                if (!Lr.visMask[mIdx]) continue
+                var mx = PX[mIdx], my = PY[mIdx]
+                if (!inView(mx, my, 10)) continue
+                ctx.moveTo(mx + 4.5, my)
+                ctx.arc(mx, my, 4.5, 0, Math.PI * 2)
+            }
+            ctx.fill()
+            ctx.stroke()
+        }
+
+        // ---- picked tip rings
+        if (pk && root.pickedCount > 0) {
+            ctx.beginPath()
+            ctx.strokeStyle = "#2f6fed"
+            ctx.fillStyle = "rgba(47,111,237,0.25)"
+            ctx.lineWidth = 1.5
+            var tlist = t.tipList
+            for (var pi = 0; pi < tlist.length; pi++) {
+                var pIdx = tlist[pi]
+                if (!pk[pIdx] || !Lr.visMask[pIdx]) continue
+                var pxx = PX[pIdx], pyy = PY[pIdx]
+                if (!inView(pxx, pyy, 10)) continue
+                ctx.moveTo(pxx + 5, pyy)
+                ctx.arc(pxx, pyy, 5, 0, Math.PI * 2)
+            }
+            ctx.fill()
+            ctx.stroke()
+        }
+
+        // ---- selection ring
+        if (sel >= 0 && Lr.visMask[sel] && !lod[sel]) {
+            ctx.beginPath()
+            ctx.strokeStyle = "#2f6fed"
+            ctx.lineWidth = 2
+            ctx.arc(PX[sel], PY[sel], 6.5, 0, Math.PI * 2)
+            ctx.stroke()
+        }
+
+        // ---- labels
+        ctx.font = fontStr(fs)
+        ctx.textBaseline = "middle"
+        var thin = Math.max(1, Math.ceil(fs * 1.1 / Math.max(rowPx, 0.01)))
+
+        function putLabel(txt, lx, ly, a, flip, color, bg) {
+            if (polar) {
+                ctx.save()
+                ctx.translate(lx, ly)
+                ctx.rotate(flip ? a + Math.PI : a)
+                ctx.textAlign = flip ? "right" : "left"
+                if (bg) {
+                    var tw = ctx.measureText(txt).width
+                    ctx.fillStyle = bg
+                    ctx.fillRect(flip ? -tw - 2 : -2, -fs / 2 - 2, tw + 4, fs + 4)
+                }
+                ctx.fillStyle = color
+                ctx.fillText(txt, 0, 0)
+                ctx.restore()
+            } else {
+                ctx.textAlign = "left"
+                if (bg) {
+                    var tw2 = ctx.measureText(txt).width
+                    ctx.fillStyle = bg
+                    ctx.fillRect(lx - 2, ly - fs / 2 - 2, tw2 + 4, fs + 4)
+                }
+                ctx.fillStyle = color
+                ctx.fillText(txt, lx, ly)
+            }
+        }
+
+        for (var l = 0; l < vis.length; l++) {
+            var li = vis[l]
+            var coll = col[li] === true && ch[li].length > 0
+            var isTip = ch[li].length === 0
+            if (!isTip && !coll) continue
+            var isM = match && match[li] === 1
+            var isP = pk && pk[li] === 1
+            var special = isM || isP
+            if (lod[li] && !special) continue
+            if (!coll && !root.showTips && !special) continue
+            if (lite && !special && !coll) continue
+            if (!coll && !special && thin > 1 && (Lr.Y[li] % thin) !== 0) continue
+
+            var txt = coll ? ((t.names[li] ? t.names[li] + " " : "") + "(" + t.tips[li] + " tips)") : t.names[li]
+            if (!txt) continue
+            var ax = PX[li], ay = PY[li], a = polar ? Lr.ANG[li] : 0
+            if (!coll && align) {
+                if (kind === "circular") { ax = ccx + zr * Math.cos(a); ay = ccy + zr * Math.sin(a) }
+                else if (kind !== "radial") ax = alignX
+            }
+            if (ax < -300 || ax > w + 300 || ay < -30 || ay > h + 30) continue
+
+            var off = 6 + (coll ? 26 : 0)
+            var lx = ax + Math.cos(a) * off, ly = ay + Math.sin(a) * off
+            var flip = polar && Math.cos(a) < 0
+            var tcolor = coll ? "#4a5560" : "#1c2128"
+            if (cat && cat.nodeCat[li] >= 0) tcolor = cat.colors[cat.nodeCat[li]]
+            var bg = null
+            if (isM) { bg = "#ffd54a"; tcolor = "#000000" }
+            if (isP) { bg = "#bcd3ff"; tcolor = "#0b2a6b" }
+            putLabel(txt, lx, ly, a, flip, tcolor, bg)
+        }
+
+        // ---- scale bar
+        if (root.showScale && pxUnit > 0) {
+            var raw = 110 / pxUnit
+            var p10 = Math.pow(10, Math.floor(Math.log(raw) / Math.LN10)), mm = raw / p10
+            var nice = (mm < 1.5 ? 1 : (mm < 3.5 ? 2 : (mm < 7.5 ? 5 : 10))) * p10
+            var barW = nice * pxUnit, bx = 20, by = h - 28
+            ctx.strokeStyle = "#4a5560"
+            ctx.lineWidth = 1.5
+            ctx.beginPath()
+            ctx.moveTo(bx, by); ctx.lineTo(bx + barW, by)
+            ctx.moveTo(bx, by - 4); ctx.lineTo(bx, by + 4)
+            ctx.moveTo(bx + barW, by - 4); ctx.lineTo(bx + barW, by + 4)
+            ctx.stroke()
+            ctx.font = fontStr(Math.max(9, fs - 1))
+            ctx.fillStyle = "#4a5560"
+            ctx.textAlign = "left"
+            ctx.textBaseline = "top"
+            ctx.fillText(String(parseFloat(nice.toPrecision(3))), bx, by + 7)
+        }
+
+        // ---- legend (drawn on the canvas so it is included in exported images)
+        if (cat && cat.labels.length > 0) {
+            ctx.font = fontStr(fs)
+            var nShow = Math.min(cat.labels.length, 16), maxW = 60
+            for (var q = 0; q < nShow; q++)
+                maxW = Math.max(maxW, ctx.measureText(cat.labels[q] + "  (" + cat.counts[q] + ")").width)
+            var rowH = fs + 7
+            var lgW = maxW + 44, lgH = 34 + nShow * rowH + (cat.labels.length > nShow ? rowH : 0)
+            ctx.fillStyle = "rgba(255,255,255,0.94)"
+            ctx.strokeStyle = "#d9dde3"
+            ctx.lineWidth = 1
+            ctx.beginPath()
+            ctx.roundedRect(14, 14, lgW, lgH, 8, 8)
+            ctx.fill()
+            ctx.stroke()
+            ctx.textAlign = "left"
+            ctx.textBaseline = "middle"
+            ctx.fillStyle = "#1c2128"
+            ctx.font = "bold " + fontStr(fs)
+            ctx.fillText("Legend", 28, 14 + 16)
+            ctx.font = fontStr(fs)
+            for (var r = 0; r < nShow; r++) {
+                var yy = 14 + 34 + r * rowH + rowH / 2 - 2
+                ctx.fillStyle = cat.colors[r]
+                ctx.fillRect(28, yy - 5, 11, 11)
+                ctx.fillStyle = "#4a5560"
+                ctx.fillText(cat.labels[r] + "  (" + cat.counts[r] + ")", 46, yy)
+            }
+            if (cat.labels.length > nShow) {
+                ctx.fillStyle = "#8a94a0"
+                ctx.fillText("+ " + (cat.labels.length - nShow) + " more", 28, 14 + 34 + nShow * rowH + rowH / 2 - 2)
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ canvas
+    TextMetrics { id: tm; font.pixelSize: root.fontSize; font.family: root.appFont }
+
+    Canvas {
+        id: canvas
+        anchors.fill: parent
+        renderStrategy: Canvas.Cooperative
+        renderTarget: root.gpuCanvas ? Canvas.FramebufferObject : Canvas.Image
+
+        onWidthChanged: requestPaint()
+        onHeightChanged: requestPaint()
+
+        onPaint: {
+            var t0 = Date.now()
+            var ctx = getContext("2d")
+            ctx.reset()
+            ctx.fillStyle = "#ffffff"
+            ctx.fillRect(0, 0, width, height)
+            if (!root.pT || width < 10 || height < 10) return
+
+            if (root.layoutDirty || !root.pL) root.computeLayout()
+            root.updateViewport(ctx, width, height)
+            root.project()
+            root.drawTree(ctx, width, height)
+            root.lastRenderMs = Date.now() - t0
+
+            if (root.announceLayout) {
+                root.announceLayout = false
+                root.notify(root.layoutName() + " layout · " + root.lastRenderMs + " ms")
+            }
+        }
+        onPainted: {
+            if (root.firstRenderPending && root.pT) {
+                root.firstRenderPending = false
+                root.renderFinished(root.lastRenderMs, root.totalTips, root.pT.n)
+            }
+        }
+    }
+
+    // ------------------------------------------------------------ interaction
+    ParallelAnimation {
+        id: viewAnim
+        NumberAnimation { id: aZoom; target: root; property: "zoomFactor"; duration: 170; easing.type: Easing.OutCubic }
+        NumberAnimation { id: aPx; target: root; property: "panX"; duration: 170; easing.type: Easing.OutCubic }
+        NumberAnimation { id: aPy; target: root; property: "panY"; duration: 170; easing.type: Easing.OutCubic }
+        NumberAnimation { id: aYs; target: root; property: "yStretch"; duration: 170; easing.type: Easing.OutCubic }
+    }
+
+    Timer {
+        id: interactTimer
+        interval: 160
+        onTriggered: { root.interacting = false; canvas.requestPaint() }
+    }
+
+    // Wheel: zoom at cursor. On big rectangular trees the wheel favours vertical
+    // zoom (x grows slowly) so rows become readable without the tree exploding
+    // sideways. Shift = vertical only, Ctrl = horizontal only.
+    WheelHandler {
+        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+        onWheel: (event) => {
+            var d = event.angleDelta.y !== 0 ? event.angleDelta.y : event.angleDelta.x
+            if (d === 0 || !root.pT) return
+            var f = Math.exp(d * 0.0011)
+            root.interacting = true
+            interactTimer.restart()
+            var m = event.point.position
+            if (root.isPolar()) { root.zoomAbout(m.x, m.y, f); return }
+            if (event.modifiers & Qt.ShiftModifier) root.zoomAboutXY(m.x, m.y, 1, f)
+            else if (event.modifiers & Qt.ControlModifier) root.zoomAboutXY(m.x, m.y, f, 1)
+            else if (root.pL && root.pL.leafCount > 250) root.zoomAboutXY(m.x, m.y, Math.pow(f, 0.35), f)
+            else root.zoomAbout(m.x, m.y, f)
+        }
+    }
+
+    // Pan
+    DragHandler {
+        id: dragH
+        target: null
+        enabled: !root.zoomTool
+        acceptedButtons: Qt.LeftButton | Qt.MiddleButton
+        acceptedModifiers: Qt.NoModifier
+        property real lx: 0
+        property real ly: 0
+        onActiveChanged: {
+            if (active) {
+                lx = centroid.position.x; ly = centroid.position.y
+                viewAnim.stop()
+                root.tgtZoom = root.zoomFactor; root.tgtPanX = root.panX
+                root.tgtPanY = root.panY; root.tgtYs = root.yStretch
+                root.interacting = true
+                interactTimer.stop()
+                root.forceActiveFocus()
+            } else {
+                interactTimer.restart()
+            }
+        }
+        onCentroidChanged: {
+            if (!active) return
+            root.panX += centroid.position.x - lx
+            root.panY += centroid.position.y - ly
+            root.tgtPanX = root.panX; root.tgtPanY = root.panY
+            lx = centroid.position.x; ly = centroid.position.y
+        }
+    }
+
+    // Rubber-band zoom: Shift+drag anywhere, or drag while the zoom-box tool is on
+    DragHandler {
+        id: boxH
+        target: null
+        acceptedButtons: Qt.LeftButton
+        acceptedModifiers: root.zoomTool ? Qt.KeyboardModifierMask : Qt.ShiftModifier
+        onActiveChanged: {
+            if (active) {
+                viewAnim.stop()
+                root.bx0 = centroid.pressPosition.x; root.by0 = centroid.pressPosition.y
+                root.bx1 = centroid.position.x; root.by1 = centroid.position.y
+                root.boxActive = true
+                root.forceActiveFocus()
+            } else {
+                root.boxActive = false
+                root.zoomToRect(root.bx0, root.by0, root.bx1, root.by1)
+                root.zoomTool = false
+            }
+        }
+        onCentroidChanged: {
+            if (!active) return
+            root.bx1 = centroid.position.x
+            root.by1 = centroid.position.y
+        }
+    }
+
+    // Taps: plain = select, double = pick label / collapse clade, Ctrl|Shift = add to picks
+    TapHandler {
+        acceptedModifiers: Qt.NoModifier
+        onTapped: (point) => { root.forceActiveFocus(); root.handleTap(point.position.x, point.position.y, "plain") }
+        onDoubleTapped: (point) => root.handleTap(point.position.x, point.position.y, "double")
+    }
+    TapHandler {
+        acceptedModifiers: Qt.ControlModifier
+        onTapped: (point) => { root.forceActiveFocus(); root.handleTap(point.position.x, point.position.y, "additive") }
+    }
+    TapHandler {
+        acceptedModifiers: Qt.ShiftModifier
+        gesturePolicy: TapHandler.ReleaseWithinBounds
+        onTapped: (point) => { root.forceActiveFocus(); root.handleTap(point.position.x, point.position.y, "additive") }
+    }
+
+    Keys.onPressed: (event) => {
+        if (event.matches(StandardKey.Copy)) { root.copyLabels(); event.accepted = true }
+    }
+    Keys.onEscapePressed: { root.zoomTool = false; root.clearAll() }
+
+    // -------------------------------------------------------------- overlay UI
+    Rectangle {
+        visible: root.boxActive
+        x: Math.min(root.bx0, root.bx1)
+        y: Math.min(root.by0, root.by1)
+        width: Math.abs(root.bx1 - root.bx0)
+        height: Math.abs(root.by1 - root.by0)
+        color: "#262f6fed"
+        border.color: "#2f6fed"
+        border.width: 1.5
+    }
+
+    component Chip: Rectangle {
+        id: chip
+        property string label: ""
+        property string tip: ""
+        property bool on: false
+        property int fontPx: 13
+        signal clicked()
+        implicitHeight: 30
+        implicitWidth: chipText.implicitWidth + 22
+        radius: 7
+        color: chip.on ? "#dbe5fd" : (chipMa.containsMouse ? "#eef1f5" : "#ffffff")
+        border.color: chip.on ? "#2f6fed" : "#d9dde3"
+        Text { id: chipText; anchors.centerIn: parent; text: chip.label; font.pixelSize: chip.fontPx; color: "#1c2128" }
+        MouseArea {
+            id: chipMa
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: chip.clicked()
+        }
+        ToolTip.visible: chip.tip !== "" && chipMa.containsMouse
+        ToolTip.text: chip.tip
+        ToolTip.delay: 450
+    }
+
+    Column {
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.margins: 16
+        spacing: 8
+        visible: root.pT !== null
+        Chip { width: 32; implicitWidth: 32; label: "+"; fontPx: 18; tip: "Zoom in"
+               onClicked: root.zoomAbout(root.width / 2, root.height / 2, 1.35) }
+        Chip { width: 32; implicitWidth: 32; label: "−"; fontPx: 18; tip: "Zoom out"
+               onClicked: root.zoomAbout(root.width / 2, root.height / 2, 1 / 1.35) }
+        Chip { width: 32; implicitWidth: 32; label: "⛶"; fontPx: 15; tip: "Fit whole tree  (Ctrl+0)"
+               onClicked: root.fitView() }
+        Chip { width: 32; implicitWidth: 32; label: "⬚"; fontPx: 16; on: root.zoomTool
+               tip: "Zoom to box — drag a rectangle (or hold Shift and drag)"
+               onClicked: root.zoomTool = !root.zoomTool }
+        Chip { width: 32; implicitWidth: 32; label: "≡"; fontPx: 17
+               tip: "Readable rows — spread tips so every label is legible"
+               onClicked: root.readableRows() }
+        Chip { width: 32; implicitWidth: 32; label: "↶"; fontPx: 16; tip: "Previous view"
+               visible: root.viewHistory.length > 0
+               onClicked: root.zoomBack() }
+    }
+
+    Chip {
+        anchors.top: parent.top
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.topMargin: 14
+        visible: root.collapsedCount > 0
+        label: "Expand all  (" + root.collapsedCount + " collapsed)"
+        fontPx: 12
+        onClicked: root.expandAll()
+    }
+
+    Rectangle {
+        id: selCard
+        visible: (root.selIndex >= 0 || root.pickedCount > 0) && root.pT !== null
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 16
+        width: selRow.implicitWidth + 24
+        height: 46
+        radius: 10
+        color: "#ffffff"
+        border.color: "#d9dde3"
+        RowLayout {
+            id: selRow
+            anchors.centerIn: parent
+            spacing: 8
+            Text {
+                text: root.pickedCount > 0
+                      ? root.pickedCount + (root.pickedCount === 1 ? " label picked" : " labels picked")
+                      : root.selectionText
+                font.pixelSize: 13
+                font.bold: true
+                color: root.pickedCount > 0 ? "#2f6fed" : "#1c2128"
+                Layout.maximumWidth: 260
+                elide: Text.ElideMiddle
+            }
+            Chip { visible: root.selIsInternal && root.pickedCount === 0
+                   label: root.selIsCollapsed ? "Expand" : "Collapse"; fontPx: 12; onClicked: root.toggleSelected() }
+            Chip { visible: root.selIndex > 0 && root.pickedCount === 0
+                   label: "Parent"; fontPx: 12; onClicked: root.selectParent() }
+            Chip { label: "Copy"; fontPx: 12; tip: "Copy label(s) — Ctrl/Cmd+C"; onClicked: root.copyLabels() }
+            Chip { label: "✕"; fontPx: 12; onClicked: root.clearAll() }
+        }
+    }
+}

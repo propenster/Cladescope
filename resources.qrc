@@ -1,0 +1,36 @@
+<RCC>
+    <qresource prefix="/">
+        <file>ui/assets/icons/speed_24dp.png</file>
+        <file>ui/assets/icons/speed_24dp.svg</file>
+        <file>ui/assets/icons/stacked_bar_chart_24dp.svg</file>
+        <file>ui/assets/icons/stacked_bar_chart_24dpi.png</file>
+        <file>ui/assets/icons/view_quilt_24dp.png</file>
+        <file>ui/assets/icons/view_quilt_24dp.svg</file>
+        <file>ui/assets/icons/dendro.jpg</file>
+        <file>ui/assets/icons/dendro.svg</file>
+        <file>ui/assets/icons/file_open_24dp.png</file>
+        <file>ui/assets/icons/file_open_24dp.svg</file>
+        <file>ui/assets/icons/settings_24dp.png</file>
+        <file>ui/assets/icons/settings_24dp.svg</file>
+        <file>ui/assets/icons/dendro_24dp.svg</file>
+        <file>ui/assets/icons/picsvg_modified.svg</file>
+        <file>ui/assets/fonts/RobotoCondensed-Black.ttf</file>
+        <file>ui/assets/fonts/RobotoCondensed-BlackItalic.ttf</file>
+        <file>ui/assets/fonts/RobotoCondensed-Bold.ttf</file>
+        <file>ui/assets/fonts/RobotoCondensed-BoldItalic.ttf</file>
+        <file>ui/assets/fonts/RobotoCondensed-ExtraBold.ttf</file>
+        <file>ui/assets/fonts/RobotoCondensed-ExtraBoldItalic.ttf</file>
+        <file>ui/assets/fonts/RobotoCondensed-ExtraLight.ttf</file>
+        <file>ui/assets/fonts/RobotoCondensed-ExtraLightItalic.ttf</file>
+        <file>ui/assets/fonts/RobotoCondensed-Italic.ttf</file>
+        <file>ui/assets/fonts/RobotoCondensed-Light.ttf</file>
+        <file>ui/assets/fonts/RobotoCondensed-LightItalic.ttf</file>
+        <file>ui/assets/fonts/RobotoCondensed-Medium.ttf</file>
+        <file>ui/assets/fonts/RobotoCondensed-MediumItalic.ttf</file>
+        <file>ui/assets/fonts/RobotoCondensed-Regular.ttf</file>
+        <file>ui/assets/fonts/RobotoCondensed-SemiBold.ttf</file>
+        <file>ui/assets/fonts/RobotoCondensed-SemiBoldItalic.ttf</file>
+        <file>ui/assets/fonts/RobotoCondensed-Thin.ttf</file>
+        <file>ui/assets/fonts/RobotoCondensed-ThinItalic.ttf</file>
+    </qresource>
+</RCC>
