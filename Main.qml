@@ -17,6 +17,13 @@ ApplicationWindow {
 
     readonly property bool hasTree: treeModel.fileName !== ""
     readonly property var vs: viewer.settings
+    property string editNote: ""      // set by backend edits, shown in the finish toast
+    property string exportPath: ""
+    property string exportFmt: "svg"
+
+    Component.onCompleted: {
+        if (appBridge.startupFile !== "") treeModel.loadPath(appBridge.startupFile)
+    }
 
     function setLayout(type, lengths) {
         vs.layoutType = type
@@ -36,9 +43,14 @@ ApplicationWindow {
             viewStack.currentIndex = 1
         }
         function onErrorOccurred(message) {
-            toast.fail("Couldn't load tree")
+            toast.fail("Couldn't complete that")
             errorDialog.text = message
             errorDialog.open()
+        }
+        function onEdited(message) { window.editNote = message }
+        function onMetadataLoaded(matched, total, key) {
+            toast.flash(matched > 0 ? "Metadata: matched " + matched + " of " + total + " rows"
+                                    : "Metadata imported, but no rows match the tip names")
         }
     }
 
@@ -46,7 +58,9 @@ ApplicationWindow {
         target: viewer
         function onRenderFinished(ms, tips, nodes) {
             toast.step("Rendering", 0.97)
-            toast.finish("Tree ready · " + tips + " tips · " + ms + " ms")
+            toast.finish((window.editNote !== "" ? window.editNote + " · " : "Tree ready · ")
+                         + tips + " tips · " + ms + " ms")
+            window.editNote = ""
         }
         function onNotify(text) { toast.flash(text) }
         function onGraphicsRequested() { graphicsDialog.open() }
@@ -55,7 +69,7 @@ ApplicationWindow {
     // ---------------------------------------------------------------- DIALOGS
     MessageDialog {
         id: errorDialog
-        title: "Error Loading File"
+        title: "qTree"
         text: "Unknown error"
         buttons: MessageDialog.Ok
     }
@@ -85,8 +99,104 @@ ApplicationWindow {
     }
 
     FileDialog {
+        id: metadataDialog
+        title: "Import Metadata Table"
+        nameFilters: ["Tables (*.csv *.tsv *.txt *.tab)", "All files (*)"]
+        onAccepted: treeModel.loadMetadata(selectedFile)
+    }
+
+    // Figure export: SVG / PDF / PNG of the whole tree at a readable size.
+    Dialog {
+        id: exportDialog
+        title: "Export figure"
+        modal: true
+        anchors.centerIn: Overlay.overlay
+        width: 460
+        readonly property var fmts: ["svg", "pdf", "png"]
+        readonly property string fmt: fmts[fmtCombo.currentIndex]
+        readonly property real pngScale: scaleCombo.currentIndex + 1
+
+        contentItem: ColumnLayout {
+            spacing: 12
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                color: "#6b7480"
+                text: "Exports the whole tree at a readable row spacing — not just what is on screen — using your current layout, colors and display options."
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Label { text: "Format"; Layout.preferredWidth: 90 }
+                ComboBox {
+                    id: fmtCombo
+                    Layout.fillWidth: true
+                    model: ["SVG — editable vector (Illustrator, Inkscape)",
+                            "PDF — vector, ready for papers",
+                            "PNG — high-resolution image"]
+                }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                visible: exportDialog.fmt === "png"
+                Label { text: "Resolution"; Layout.preferredWidth: 90 }
+                ComboBox {
+                    id: scaleCombo
+                    Layout.fillWidth: true
+                    model: ["1×  (screen)", "2×  (sharp)", "3×  (print)", "4×  (large print)"]
+                    currentIndex: 1
+                }
+            }
+            CheckBox {
+                id: includeSelBox
+                text: "Include search matches and current selection"
+            }
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                color: "#8a94a0"
+                font.pixelSize: 12
+                visible: exportDialog.fmt === "svg"
+                text: "Text stays editable. If your editor lacks the tree font it will substitute one; use PDF to embed the look."
+            }
+        }
+
+        footer: DialogButtonBox {
+            Button { text: "Cancel"; DialogButtonBox.buttonRole: DialogButtonBox.RejectRole }
+            Button { text: "Choose file…"; highlighted: true; DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole }
+        }
+        onAccepted: exportFileDialog.open()
+    }
+
+    FileDialog {
+        id: exportFileDialog
+        title: "Export figure"
+        fileMode: FileDialog.SaveFile
+        defaultSuffix: exportDialog.fmt
+        nameFilters: exportDialog.fmt === "svg" ? ["SVG vector (*.svg)"]
+                   : (exportDialog.fmt === "pdf" ? ["PDF document (*.pdf)"] : ["PNG image (*.png)"])
+        onAccepted: {
+            window.exportPath = treeModel.localPath(selectedFile)
+            window.exportFmt = exportDialog.fmt
+            toast.begin("Exporting " + exportDialog.fmt.toUpperCase())
+            toast.step("Laying out the whole tree", 0.35)
+            exportTimer.start()          // let the toast paint before the heavy work
+        }
+    }
+
+    Timer {
+        id: exportTimer
+        interval: 80
+        onTriggered: {
+            var ok = viewer.exportFigure(window.exportPath, window.exportFmt,
+                                         exportDialog.pngScale, includeSelBox.checked)
+            if (ok) toast.finish("Exported " + window.exportFmt.toUpperCase())
+            else toast.fail("Export failed — check the file location")
+        }
+    }
+
+    FileDialog {
         id: exportImageDialog
-        title: "Export Tree Image"
+        title: "Export Current View as PNG"
         fileMode: FileDialog.SaveFile
         defaultSuffix: "png"
         nameFilters: ["PNG image (*.png)"]
@@ -116,6 +226,8 @@ ApplicationWindow {
                   "<b>Ctrl/Cmd + click</b> — add tips (or a whole clade) to the highlighted set<br>" +
                   "<b>Ctrl/Cmd + C</b> — copy highlighted labels, one per line<br>" +
                   "<b>Esc</b> — clear selection &nbsp; <b>Ctrl+F</b> — search &nbsp; <b>Ctrl+0</b> — fit<br>" +
+                  "<b>Select a clade</b> — then Highlight, Reroot, Extract or Open in new window from the card at the bottom<br>" +
+                  "<b>Ctrl/Cmd + Z</b> — undo a reroot or extract<br>" +
                   "<b>≡</b> button — spread tips so every label is legible &nbsp; <b>↶</b> — previous view<br>" +
                   "<b>Drop a file</b> on the window to open it"
         }
@@ -197,6 +309,7 @@ ApplicationWindow {
 
     Shortcut { sequences: [StandardKey.Open]; onActivated: openFileDialog.open() }
     Shortcut { sequence: "Ctrl+0"; enabled: window.hasTree; onActivated: vs.fitView() }
+    Shortcut { sequences: [StandardKey.Undo]; enabled: window.hasTree && viewer.canUndo; onActivated: viewer.undo() }
 
     // ------------------------------------------------------------------ MENUS
     Menu {
@@ -204,8 +317,11 @@ ApplicationWindow {
         MenuItem { text: "Open Tree File…"; onTriggered: openFileDialog.open() }
         MenuItem { text: "Load Example Tree"; onTriggered: treeModel.loadExample() }
         MenuSeparator {}
+        MenuItem { text: "Import Metadata…"; enabled: window.hasTree; onTriggered: metadataDialog.open() }
+        MenuSeparator {}
         MenuItem { text: "Save as Newick…"; enabled: window.hasTree; onTriggered: saveNewickDialog.open() }
-        MenuItem { text: "Export Image…"; enabled: window.hasTree; onTriggered: exportImageDialog.open() }
+        MenuItem { text: "Export Figure (SVG / PDF / PNG)…"; enabled: window.hasTree; onTriggered: exportDialog.open() }
+        MenuItem { text: "Export Current View as PNG…"; enabled: window.hasTree; onTriggered: exportImageDialog.open() }
         MenuSeparator {}
         MenuItem { text: "Exit"; onTriggered: Qt.quit() }
     }
@@ -218,6 +334,21 @@ ApplicationWindow {
         MenuItem { text: "Circular phylogram"; onTriggered: window.setLayout("circular", true) }
         MenuItem { text: "Circular cladogram"; onTriggered: window.setLayout("circular", false) }
         MenuItem { text: "Radial (unrooted) phylogram"; onTriggered: window.setLayout("radial", true) }
+    }
+
+    Menu {
+        id: treeMenu
+        MenuItem { text: "Midpoint root"; enabled: window.hasTree; onTriggered: viewer.midpointRoot() }
+        MenuItem { text: "Reroot on selected branch"; enabled: viewer.canEditSelection; onTriggered: viewer.rerootSelected() }
+        MenuSeparator {}
+        MenuItem { text: "Highlight selected clade…"; enabled: viewer.canEditSelection; onTriggered: viewer.highlightSelected() }
+        MenuItem { text: "Clear all highlights"; enabled: window.hasTree; onTriggered: viewer.clearHighlights() }
+        MenuSeparator {}
+        MenuItem { text: "Extract selected clade"; enabled: viewer.selectionIsClade; onTriggered: viewer.extractSelected() }
+        MenuItem { text: "Open selected clade in new window"; enabled: viewer.selectionIsClade
+                   onTriggered: viewer.openCladeInNewWindow(viewer.selectedNode) }
+        MenuSeparator {}
+        MenuItem { text: "Undo   (Ctrl+Z)"; enabled: viewer.canUndo; onTriggered: viewer.undo() }
     }
 
     Menu {
@@ -252,6 +383,8 @@ ApplicationWindow {
                    checked: vs.showLengths; onToggled: vs.showLengths = checked }
         MenuItem { text: "Color uniform clades"; checkable: true
                    checked: vs.colorBranches; onToggled: vs.colorBranches = checked }
+        MenuSeparator {}
+        MenuItem { text: "Import metadata table…"; onTriggered: metadataDialog.open() }
     }
 
     Menu {
@@ -291,6 +424,14 @@ ApplicationWindow {
                 onClicked: layoutMenu.popup(layoutBtn, 0, layoutBtn.height)
             }
             MenuButton {
+                id: treeBtn
+                iconSource: "qrc:/ui/assets/icons/account_tree_24dp.svg"
+                labelText: "Tree"
+                enabled: window.hasTree
+                isActive: treeMenu.visible
+                onClicked: treeMenu.popup(treeBtn, 0, treeBtn.height)
+            }
+            MenuButton {
                 id: perfBtn
                 iconSource: "qrc:/ui/assets/icons/speed_24dp.svg"
                 labelText: "Performance"
@@ -325,87 +466,97 @@ ApplicationWindow {
         currentIndex: 0
 
         // VIEW 0: START SCREEN
-        RowLayout {
-            spacing: 40
-            Layout.margins: 40
+        Item {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
 
-            ColumnLayout {
-                Layout.preferredWidth: 450
-                Layout.fillHeight: true
-                spacing: 25
+            RowLayout {
+                anchors.fill: parent
+                anchors.margins: 40 // Gives you the clean room on the left, right, top, and bottom
+                spacing: 40
 
-                Item { Layout.fillHeight: true }
+                ColumnLayout {
+                    // Instead of a rigid 450px width, let it scale but cap it at 500
+                    Layout.fillWidth: true
+                    Layout.maximumWidth: 500
+                    Layout.fillHeight: true
+                    spacing: 25
 
-                RowLayout {
-                    spacing: 10
+                    Item { Layout.fillHeight: true } // Top spacer
+
+                    RowLayout {
+                        spacing: 10
+                        Image {
+                            source: "qrc:/ui/assets/icons/picsvg_modified.svg"
+                            sourceSize.width: 120; sourceSize.height: 120
+                            Layout.preferredWidth: 120; Layout.preferredHeight: 120
+                            fillMode: Image.PreserveAspectFit
+                            layer.enabled: true
+                            layer.effect: MultiEffect { colorization: 1.0; colorizationColor: "#212121" }
+                        }
+                        Text {
+                            text: "qTree"
+                            font.pixelSize: 42
+                            font.bold: true
+                            color: "#212121"
+                            Layout.alignment: Qt.AlignVCenter
+                        }
+                    }
+
+                    Text {
+                        text: "Welcome to qTree: Next-Gen Phylogenetics"
+                        font.pixelSize: 28
+                        color: "#6c757d"
+                        Layout.fillWidth: true // Ensure it knows to wrap within the column
+                        // wrapMode: Text.WordWrap
+                    }
+
+                    RowLayout {
+                        spacing: 15
+                        Layout.topMargin: 6
+                        Button {
+                            text: "Open File"
+                            font.pixelSize: 20
+                            padding: 12
+                            Layout.preferredWidth: 150
+                            onClicked: openFileDialog.open()
+                        }
+                        Button {
+                            text: "Try an example"
+                            flat: true
+                            font.pixelSize: 20
+                            padding: 12
+                            onClicked: treeModel.loadExample()
+                        }
+                    }
+
+                    Text {
+                        text: "…or drop a .nwk / .tre / .nex file anywhere on this window."
+                        font.pixelSize: 14
+                        color: "#8a94a0"
+                        Layout.fillWidth: true // Ensure it knows to wrap
+                        wrapMode: Text.WordWrap
+                    }
+
+                    Item { Layout.fillHeight: true } // Bottom spacer
+                }
+
+                Item {
+                    Layout.minimumWidth: 300
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+
                     Image {
+                        width: Math.min(parent.width, parent.height) * 0.95
+                        height: width
+                        x: (parent.width - width) / 2
+                        y: (parent.height - height) / 2
                         source: "qrc:/ui/assets/icons/picsvg_modified.svg"
-                        sourceSize.width: 120; sourceSize.height: 120
-                        Layout.preferredWidth: 120; Layout.preferredHeight: 120
                         fillMode: Image.PreserveAspectFit
+                        opacity: 0.85
                         layer.enabled: true
                         layer.effect: MultiEffect { colorization: 1.0; colorizationColor: "#212121" }
                     }
-                    Text {
-                        text: "qTree"
-                        font.pixelSize: 42
-                        font.bold: true
-                        color: "#212121"
-                        Layout.alignment: Qt.AlignVCenter
-                    }
-                }
-
-                Text {
-                    text: "Welcome to qTree: Next-Gen Phylogenetics"
-                    font.pixelSize: 28
-                    color: "#6c757d"
-                    Layout.fillWidth: true
-                    wrapMode: Text.WordWrap
-                }
-
-                RowLayout {
-                    spacing: 15
-                    Layout.topMargin: 6
-                    Button {
-                        text: "Open File"
-                        font.pixelSize: 20
-                        padding: 12
-                        Layout.preferredWidth: 150
-                        onClicked: openFileDialog.open()
-                    }
-                    Button {
-                        text: "Try an example"
-                        flat: true
-                        font.pixelSize: 20
-                        padding: 12
-                        onClicked: treeModel.loadExample()
-                    }
-                }
-
-                Text {
-                    text: "…or drop a .nwk / .tre / .nex file anywhere on this window."
-                    font.pixelSize: 14
-                    color: "#8a94a0"
-                }
-
-                Item { Layout.fillHeight: true }
-            }
-
-            Item {
-                Layout.minimumWidth: 400
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-
-                Image {
-                    width: Math.min(parent.width, parent.height) * 0.95
-                    height: width
-                    x: (parent.width - width) / 2
-                    y: (parent.height - height) / 2
-                    source: "qrc:/ui/assets/icons/picsvg_modified.svg"
-                    fillMode: Image.PreserveAspectFit
-                    opacity: 0.85
-                    layer.enabled: true
-                    layer.effect: MultiEffect { colorization: 1.0; colorizationColor: "#212121" }
                 }
             }
         }

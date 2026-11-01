@@ -32,5 +32,6 @@
         <file>ui/assets/fonts/RobotoCondensed-SemiBoldItalic.ttf</file>
         <file>ui/assets/fonts/RobotoCondensed-Thin.ttf</file>
         <file>ui/assets/fonts/RobotoCondensed-ThinItalic.ttf</file>
+        <file>ui/assets/icons/account_tree_24dp.svg</file>
     </qresource>
 </RCC>

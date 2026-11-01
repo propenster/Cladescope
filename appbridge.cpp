@@ -2,13 +2,23 @@
 
 #include <QClipboard>
 #include <QCoreApplication>
+#include <QDateTime>
+#include <QDir>
+#include <QFile>
 #include <QGuiApplication>
+#include <QImage>
+#include <QMarginsF>
 #include <QOpenGLContext>
 #include <QOpenGLFunctions>
+#include <QPageSize>
+#include <QPainter>
+#include <QPdfWriter>
 #include <QProcess>
 #include <QQuickWindow>
 #include <QSGRendererInterface>
 #include <QSettings>
+#include <QSvgRenderer>
+#include <QTextStream>
 
 namespace {
 QString apiName(QSGRendererInterface::GraphicsApi a)
@@ -24,7 +34,8 @@ QString apiName(QSGRendererInterface::GraphicsApi a)
 }
 } // namespace
 
-AppBridge::AppBridge(QObject *parent) : QObject(parent) {}
+AppBridge::AppBridge(const QString &startupFile, QObject *parent)
+    : QObject(parent), m_startupFile(startupFile) {}
 
 void AppBridge::applyStartupBackend()
 {
@@ -92,4 +103,76 @@ void AppBridge::restart()
     QProcess::startDetached(QCoreApplication::applicationFilePath(),
                             QCoreApplication::arguments().mid(1));
     QCoreApplication::quit();
+}
+
+// ------------------------------------------------------------ figure export
+
+bool AppBridge::saveText(const QString &path, const QString &text)
+{
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) return false;
+    QTextStream out(&f);
+    out << text;
+    return true;
+}
+
+bool AppBridge::renderPdf(const QString &path, const QString &svg)
+{
+    QSvgRenderer renderer(svg.toUtf8());
+    if (!renderer.isValid()) return false;
+
+    QSizeF size = renderer.viewBoxF().size();
+    if (size.isEmpty()) return false;
+
+    // PDF pages are limited to 14400 pt; scale very large trees down to fit.
+    const qreal maxDim = 14000.0;
+    const qreal k = qMin<qreal>(1.0, maxDim / qMax(size.width(), size.height()));
+    const QSizeF page(size.width() * k, size.height() * k);
+
+    QPdfWriter pdf(path);
+    pdf.setResolution(72);
+    pdf.setPageSize(QPageSize(page, QPageSize::Point));
+    pdf.setPageMargins(QMarginsF(0, 0, 0, 0));
+    pdf.setCreator("qTree");
+
+    QPainter p(&pdf);
+    if (!p.isActive()) return false;
+    p.setRenderHint(QPainter::Antialiasing);
+    p.setRenderHint(QPainter::TextAntialiasing);
+    renderer.render(&p, QRectF(QPointF(0, 0), page));
+    p.end();
+    return true;
+}
+
+bool AppBridge::renderPng(const QString &path, const QString &svg, double scale)
+{
+    QSvgRenderer renderer(svg.toUtf8());
+    if (!renderer.isValid()) return false;
+
+    const QSizeF size = renderer.viewBoxF().size();
+    if (size.isEmpty()) return false;
+
+    qreal s = qMax(0.25, scale);
+    // keep the bitmap within sane limits
+    while ((size.width() * s > 20000 || size.height() * s > 20000
+            || size.width() * s * size.height() * s > 1.5e8) && s > 0.1)
+        s *= 0.85;
+
+    QImage img(QSize(qRound(size.width() * s), qRound(size.height() * s)), QImage::Format_ARGB32);
+    if (img.isNull()) return false;
+    img.fill(Qt::white);
+    QPainter p(&img);
+    p.setRenderHint(QPainter::Antialiasing);
+    p.setRenderHint(QPainter::TextAntialiasing);
+    renderer.render(&p, QRectF(QPointF(0, 0), QSizeF(img.size())));
+    p.end();
+    return img.save(path);
+}
+
+bool AppBridge::openNewWindow(const QString &newick, const QString &name)
+{
+    const QString path = QDir::temp().filePath(
+        QString("qtree_%1_%2.nwk").arg(name).arg(QDateTime::currentMSecsSinceEpoch()));
+    if (!saveText(path, newick + "\n")) return false;
+    return QProcess::startDetached(QCoreApplication::applicationFilePath(), QStringList() << path);
 }

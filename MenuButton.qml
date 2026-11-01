@@ -21,16 +21,18 @@ Button {
     contentItem: RowLayout {
         spacing: 6
         Image {
+            visible: root.iconSource !== ""
             source: root.iconSource
             sourceSize.width: 22; sourceSize.height: 22
-            width: 22; height: 22
+            Layout.preferredWidth: root.iconSource !== "" ? 22 : 0
+            Layout.preferredHeight: 22
             layer.enabled: true
             layer.effect: MultiEffect { colorization: 1.0; colorizationColor: "#212121" }
         }
         Text {
             text: root.labelText
             font.pixelSize: 15
-            color: "#212121"
+            color: root.enabled ? "#212121" : "#a0a7b0"
         }
     }
 }

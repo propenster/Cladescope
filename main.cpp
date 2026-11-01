@@ -1,3 +1,4 @@
+#include <QFileInfo>
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -17,10 +18,16 @@ int main(int argc, char *argv[])
     // Honour the user's saved graphics backend (must precede window creation).
     AppBridge::applyStartupBackend();
 
+    // A tree file passed on the command line ("Open with…", clade in new window)
+    QString startFile;
+    const QStringList args = app.arguments();
+    if (args.size() > 1 && QFileInfo::exists(args.at(1)))
+        startFile = QFileInfo(args.at(1)).absoluteFilePath();
+
     QQmlApplicationEngine engine;
     qmlRegisterType<TreeModel>("com.qtree.backend", 1, 0, "TreeModel");
 
-    AppBridge bridge;
+    AppBridge bridge(startFile);
     engine.rootContext()->setContextProperty("appBridge", &bridge);
 
     QObject::connect(

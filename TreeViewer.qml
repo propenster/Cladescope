@@ -11,8 +11,55 @@ Item {
     signal renderFinished(int ms, int tips, int nodes)
     signal notify(string text)
     signal graphicsRequested()
+    signal importMetadataRequested()
 
     function exportImage(path) { return canvasView.exportImage(path) }
+
+    // ----------------------------------------------------------------- metadata
+    readonly property var metaColumns: (root.treeModel && root.treeModel.metadata && root.treeModel.metadata.columns)
+                                       ? root.treeModel.metadata.columns : []
+    onMetaColumnsChanged: {
+        if (vs.colorColumn !== "" && metaColumns.indexOf(vs.colorColumn) < 0) vs.colorColumn = ""
+        if (metaColumns.length === 0) vs.metaSummary = ""
+    }
+    Connections {
+        target: root.treeModel
+        function onMetadataLoaded(matched, total, key) {
+            vs.metaSummary = "Matched " + matched + " of " + total + " rows"
+                             + (key !== "" ? " on \u201c" + key + "\u201d" : "")
+                             + (matched === 0 ? " \u2014 no column matches the tip names" : "")
+        }
+    }
+
+    // ------------------------------------------------------------ tree editing
+    readonly property int selectedNode: canvasView.selIndex
+    readonly property bool hasTree: canvasView.pT !== null
+    readonly property bool canUndo: root.treeModel ? root.treeModel.canUndo : false
+    readonly property bool canEditSelection: canvasView.selIndex > 0
+    readonly property bool selectionIsClade: canvasView.selIndex > 0 && canvasView.selIsInternal
+
+    function midpointRoot() { if (treeModel) treeModel.midpointRoot() }
+    function rerootSelected() { if (treeModel && canEditSelection) treeModel.rerootAt(canvasView.selIndex) }
+    function extractSelected() { if (treeModel && selectionIsClade) treeModel.extractClade(canvasView.selIndex) }
+    function undo() { if (treeModel) treeModel.undo() }
+    function highlightSelected() { if (selectionIsClade || canEditSelection) canvasView.hlOpen = true }
+    function clearHighlights() { canvasView.clearHighlights() }
+    function openCladeInNewWindow(node) {
+        if (!treeModel || node <= 0) return
+        var nm = canvasView.pT && canvasView.pT.names[node] ? canvasView.pT.names[node] : "clade"
+        if (!appBridge.openNewWindow(treeModel.subtreeNewick(node), nm.replace(/[^A-Za-z0-9_-]/g, "_")))
+            root.notify("Could not open a new window")
+    }
+
+    // -------------------------------------------------------------- export
+    // format: "svg" | "pdf" | "png"; scale only matters for png.
+    function exportFigure(path, format, scale, includeSel) {
+        var svg = canvasView.buildSvg({ selection: includeSel === true, rasterFonts: format !== "svg" })
+        if (svg === "") return false
+        if (format === "svg") return appBridge.saveText(path, svg)
+        if (format === "pdf") return appBridge.renderPdf(path, svg)
+        return appBridge.renderPng(path, svg, scale)
+    }
 
     // ------------------------------------------------------------------ fonts
     // UI font (also the default tree font)
@@ -83,6 +130,9 @@ Item {
         property bool colorBranches: true
         property int categoryCount: 0
         property string regexError: ""
+        property string colorColumn: ""             // "" = tip names
+        property string metaSummary: ""
+        readonly property var metaColumns: root.metaColumns
 
         property string appFont: fontLight.status === FontLoader.Ready ? fontLight.name : "sans-serif"
         property string appFontBold: fontBold.status === FontLoader.Ready ? fontBold.name : "sans-serif"
@@ -95,6 +145,8 @@ Item {
         signal fitView()
         signal pickMatches()
         signal copyMatches()
+        signal importMetadataRequested()
+        signal clearMetadataRequested()
 
         function reset() {
             layoutType = "rectangular"; useBranchLengths = true; ladderize = "none"
@@ -113,6 +165,8 @@ Item {
         function onFitView() { canvasView.fitView() }
         function onPickMatches() { canvasView.pickMatches() }
         function onCopyMatches() { canvasView.copyMatches() }
+        function onImportMetadataRequested() { root.importMetadataRequested() }
+        function onClearMetadataRequested() { if (root.treeModel) root.treeModel.clearMetadata() }
     }
 
     Shortcut {
@@ -176,6 +230,9 @@ Item {
                 colorPattern: vs.colorPattern
                 colorEnabled: vs.colorEnabled
                 colorBranches: vs.colorBranches
+                colorColumn: vs.colorColumn
+                metadata: root.treeModel ? root.treeModel.metadata : null
+                canUndo: root.canUndo
                 appFont: vs.treeFont !== "" ? vs.treeFont : vs.appFont
 
                 onMatchCountChanged: vs.matchCount = matchCount
@@ -184,6 +241,10 @@ Item {
                 onRenderFinished: (ms, tips, nodes) => root.renderFinished(ms, tips, nodes)
                 onNotify: (text) => root.notify(text)
                 onCopyRequested: (text) => appBridge.copyText(text)
+                onRerootRequested: (node) => { if (root.treeModel) root.treeModel.rerootAt(node) }
+                onExtractRequested: (node) => { if (root.treeModel) root.treeModel.extractClade(node) }
+                onNewWindowRequested: (node) => root.openCladeInNewWindow(node)
+                onUndoRequested: root.undo()
             }
         }
 

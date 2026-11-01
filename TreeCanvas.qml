@@ -30,6 +30,9 @@ Item {
     property bool colorEnabled: false
     property bool colorBranches: true
     property string appFont: "sans-serif"
+    property var metadata: null                 // TreeModel.metadata (columns aligned to node index)
+    property string colorColumn: ""             // "" = tip names, else the name of a metadata column
+    property bool canUndo: false
 
     // ----------------------------------------------------------------- outputs
     property int matchCount: 0
@@ -44,6 +47,7 @@ Item {
     property bool selIsInternal: false
     property bool selIsCollapsed: false
     property int totalTips: 0
+    property int highlightCount: 0
 
     // view transform. x/polar scale = zoomFactor, y scale = zoomFactor * yStretch
     property real zoomFactor: 1.0
@@ -55,6 +59,10 @@ Item {
     signal renderFinished(int ms, int tips, int nodes)
     signal notify(string text)
     signal copyRequested(string text)
+    signal rerootRequested(int node)
+    signal extractRequested(int node)
+    signal newWindowRequested(int node)
+    signal undoRequested()
 
     // ---------------------------------------------------------- internal state
     property var pT: null             // prepared tree (typed arrays)
@@ -66,6 +74,9 @@ Item {
     property var matchList: []
     property int matchCursor: -1
     property var pickedFlags: null
+    property var highlights: ({})               // node index -> fill colour
+    property bool hlOpen: false
+    property string _colorSig: ""
     property int selIndex: -1
     property bool layoutDirty: true
     property bool firstRenderPending: false
@@ -90,6 +101,7 @@ Item {
 
     // --------------------------------------------------------- change handling
     onTreeDataChanged: prepareTree()
+    onSelIndexChanged: root.hlOpen = false
 
     property var _paintDeps: [fontSize, lineWidth, branchColor, showTips, alignTips, showNodeDots,
                               showScale, showSupport, showLengths, colorBranches, performanceMode,
@@ -106,8 +118,15 @@ Item {
     property var _searchDeps: [searchQuery, searchRegex, searchCaseSensitive]
     on_SearchDepsChanged: { recomputeSearch(); canvas.requestPaint() }
 
-    property var _colorDeps: [colorPattern, colorEnabled]
-    on_ColorDepsChanged: { recomputeCategories(true); canvas.requestPaint() }
+    property var _colorDeps: [colorPattern, colorEnabled, colorColumn, metadata]
+    on_ColorDepsChanged: {
+        // only announce when the user's colouring choice changed, not when metadata is re-aligned after an edit
+        var sig = colorPattern + "|" + colorEnabled + "|" + colorColumn
+        var announce = sig !== root._colorSig
+        root._colorSig = sig
+        recomputeCategories(announce)
+        canvas.requestPaint()
+    }
 
     function isPolar() { return pL !== null && (pL.kind === "circular" || pL.kind === "radial") }
 
@@ -119,6 +138,9 @@ Item {
         root.selIndex = -1
         root.pickedFlags = null
         root.pickedCount = 0
+        root.highlights = ({})
+        root.highlightCount = 0
+        root.hlOpen = false
         root.viewHistory = []
         root.pL = null
         root.cat = null
@@ -204,22 +226,41 @@ Item {
     }
 
     // --------------------------------------------------------- colour by regex
+    function columnIndex(name) {
+        if (!name || !root.metadata || !root.metadata.columns) return -1
+        return root.metadata.columns.indexOf(name)
+    }
+
+    // Categories come from the tip name or a metadata column; an optional regex
+    // (first capture group, else whole match) is applied to that text.
     function recomputeCategories(announce) {
         root.cat = null
         root.categoryCount = 0
         root.regexError = ""
-        if (!root.pT || !root.colorEnabled || !root.colorPattern) return
-        var re
-        try { re = new RegExp(root.colorPattern) }
-        catch (e) { root.regexError = "Invalid pattern: " + e.message; return }
+        if (!root.pT) return
+        var colIdx = columnIndex(root.colorColumn)
+        var usePattern = root.colorEnabled && root.colorPattern !== ""
+        if (colIdx < 0 && !usePattern) return
+        var re = null
+        if (usePattern) {
+            try { re = new RegExp(root.colorPattern) }
+            catch (e) { root.regexError = "Invalid pattern: " + e.message; return }
+        }
+        var colVals = colIdx >= 0 ? root.metadata.values[colIdx] : null
 
         var t = root.pT, n = t.n
         var keyOf = new Array(n), counts = {}
         for (var k = 0; k < t.tipList.length; k++) {
             var idx = t.tipList[k]
-            var m = re.exec(t.names[idx])
-            if (!m) continue
-            var key = (m.length > 1 && m[1] !== undefined) ? m[1] : m[0]
+            var text = colVals ? colVals[idx] : t.names[idx]
+            if (text === undefined || text === null || text === "") continue
+            var key = text
+            if (re) {
+                var m = re.exec(text)
+                if (!m) continue
+                key = m[0]
+                for (var g = 1; g < m.length; g++) if (m[g] !== undefined && m[g] !== "") { key = m[g]; break }
+            }
             if (key === "") continue
             keyOf[idx] = key
             counts[key] = (counts[key] || 0) + 1
@@ -252,7 +293,7 @@ Item {
         root.cat = { labels: labels, colors: colors, counts: cnt, nodeCat: nodeCat }
         root.categoryCount = labels.length
         if (announce && labels.length > 0)
-            root.notify("Colored by pattern · " + labels.length + " categories")
+            root.notify("Colored by " + (colIdx >= 0 ? root.colorColumn : "pattern") + " · " + labels.length + " categories")
     }
 
     // ------------------------------------------------- selection / label picking
@@ -360,6 +401,30 @@ Item {
         for (var k = 0; k < root.matchList.length; k++) out.push(root.pT.names[root.matchList[k]])
         root.copyRequested(out.join("\n"))
         root.notify("Copied " + out.length + " matching labels")
+    }
+
+    // ---- clade highlights (shaded backgrounds behind a clade)
+    function highlightSelected(color) {
+        if (!root.pT || root.selIndex < 0) return
+        var h = {}
+        for (var k in root.highlights) h[k] = root.highlights[k]
+        h[root.selIndex] = color
+        root.highlights = h
+        root.highlightCount = Object.keys(h).length
+        canvas.requestPaint()
+    }
+    function unhighlightSelected() {
+        if (root.selIndex < 0 || root.highlights[root.selIndex] === undefined) return
+        var h = {}
+        for (var k in root.highlights) if (parseInt(k) !== root.selIndex) h[k] = root.highlights[k]
+        root.highlights = h
+        root.highlightCount = Object.keys(h).length
+        canvas.requestPaint()
+    }
+    function clearHighlights() {
+        root.highlights = ({})
+        root.highlightCount = 0
+        canvas.requestPaint()
     }
 
     // ---- hit testing (tip labels first, then nodes)
@@ -704,6 +769,7 @@ Item {
 
         root.pL = { kind: kind, vis: vis, visMask: mask, U: U, V: V, Y: Y, ANG: ANG, RAD: RAD,
                     Ymin: Ymin, Ymax: Ymax, Dmax: Dmax, lod: new Uint8Array(n),
+                    A0: (typeof a0 !== "undefined") ? a0 : null, A1: (typeof a1 !== "undefined") ? a1 : null,
                     PX: new Float64Array(n), PY: new Float64Array(n),
                     leafCount: leaves, maxDepth: maxDepth, useLen: useLen, half: half }
         root.leafCount = leaves
@@ -721,6 +787,7 @@ Item {
         var lw = 0
         if (root.showTips && root.pT.longest) lw = Math.min(ctx.measureText(root.pT.longest).width + 14, w * 0.3)
         var pad = 28, v = root.vp
+        v.lw = lw
         if (root.pL.kind === "circular" || root.pL.kind === "radial") {
             v.cx = w / 2; v.cy = h / 2
             v.R = Math.max(30, Math.min(w, h) / 2 - pad - lw)
@@ -756,6 +823,82 @@ Item {
     function layoutName() {
         var n = { rectangular: "Rectangular", slanted: "Slanted", circular: "Circular", radial: "Radial" }[root.layoutType]
         return (n || "Rectangular") + (root.useBranchLengths && root.pT && root.pT.hasLengths ? " phylogram" : " cladogram")
+    }
+
+    // ---------------------------------------------------- highlight geometry
+    // g = { PX, PY, R, cx, cy, lw, rowH, xr, rowY(fn) } in whichever coordinate
+    // space (screen or export) the caller is working in.
+    function hlShape(hn, g) {
+        var Lr = root.pL, t = root.pT, par = t.par, L = Math.max(Lr.leafCount, 1)
+        if (Lr.kind === "radial") {
+            var ax = g.PX[hn], ay = g.PY[hn], mr = 0, end = hn + t.size[hn], vis = Lr.vis
+            for (var k = 0; k < vis.length; k++) {
+                var q = vis[k]
+                if (q < hn) continue
+                if (q >= end) break
+                var dx = g.PX[q] - ax, dy = g.PY[q] - ay, d = Math.sqrt(dx * dx + dy * dy)
+                if (d > mr) mr = d
+            }
+            return { type: "wedge", ax: ax, ay: ay, r: mr + g.lw + 12, a0: Lr.A0[hn], a1: Lr.A1[hn] }
+        }
+        if (Lr.kind === "circular") {
+            return { type: "sector", cx: g.cx, cy: g.cy,
+                     ri: hn > 0 ? Lr.RAD[par[hn]] * g.R : 0, ro: g.R + g.lw + 10,
+                     a0: (Lr.Ymin[hn] / L) * 2 * Math.PI - Math.PI / 2 - Math.PI / L,
+                     a1: (Lr.Ymax[hn] / L) * 2 * Math.PI - Math.PI / 2 + Math.PI / L }
+        }
+        return { type: "rect", x0: hn > 0 ? g.PX[par[hn]] - 2 : g.PX[0] - 6, x1: g.xr,
+                 y0: g.rowY(Lr.Ymin[hn]) - g.rowH / 2, y1: g.rowY(Lr.Ymax[hn]) + g.rowH / 2 }
+    }
+
+    function fillShape(ctx, s) {
+        ctx.beginPath()
+        if (s.type === "rect") {
+            ctx.rect(s.x0, s.y0, s.x1 - s.x0, s.y1 - s.y0)
+        } else if (s.type === "wedge") {
+            if (s.a1 - s.a0 > 2 * Math.PI - 0.02) ctx.arc(s.ax, s.ay, s.r, 0, 2 * Math.PI)
+            else { ctx.moveTo(s.ax, s.ay); ctx.arc(s.ax, s.ay, s.r, s.a0, s.a1, false); ctx.closePath() }
+        } else {
+            if (s.a1 - s.a0 > 2 * Math.PI - 0.02) ctx.arc(s.cx, s.cy, s.ro, 0, 2 * Math.PI)
+            else {
+                ctx.arc(s.cx, s.cy, s.ro, s.a0, s.a1, false)
+                if (s.ri > 0.5) ctx.arc(s.cx, s.cy, s.ri, s.a1, s.a0, true)
+                else ctx.lineTo(s.cx, s.cy)
+                ctx.closePath()
+            }
+        }
+        ctx.fill()
+    }
+
+    function nf(x) { return String(Math.round(x * 100) / 100) }
+
+    function shapePath(s) {
+        var T = Math.PI * 2
+        if (s.type === "rect")
+            return "M" + nf(s.x0) + " " + nf(s.y0) + "H" + nf(s.x1) + "V" + nf(s.y1) + "H" + nf(s.x0) + "Z"
+        if (s.type === "wedge") {
+            if (s.a1 - s.a0 > T - 0.02)
+                return "M" + nf(s.ax - s.r) + " " + nf(s.ay) + "A" + nf(s.r) + " " + nf(s.r) + " 0 1 0 " + nf(s.ax + s.r) + " " + nf(s.ay)
+                       + "A" + nf(s.r) + " " + nf(s.r) + " 0 1 0 " + nf(s.ax - s.r) + " " + nf(s.ay) + "Z"
+            var bigW = (s.a1 - s.a0) > Math.PI ? 1 : 0
+            return "M" + nf(s.ax) + " " + nf(s.ay)
+                   + "L" + nf(s.ax + s.r * Math.cos(s.a0)) + " " + nf(s.ay + s.r * Math.sin(s.a0))
+                   + "A" + nf(s.r) + " " + nf(s.r) + " 0 " + bigW + " 1 "
+                   + nf(s.ax + s.r * Math.cos(s.a1)) + " " + nf(s.ay + s.r * Math.sin(s.a1)) + "Z"
+        }
+        if (s.a1 - s.a0 > T - 0.02)
+            return "M" + nf(s.cx - s.ro) + " " + nf(s.cy) + "A" + nf(s.ro) + " " + nf(s.ro) + " 0 1 0 " + nf(s.cx + s.ro) + " " + nf(s.cy)
+                   + "A" + nf(s.ro) + " " + nf(s.ro) + " 0 1 0 " + nf(s.cx - s.ro) + " " + nf(s.cy) + "Z"
+        var big = (s.a1 - s.a0) > Math.PI ? 1 : 0
+        var d = "M" + nf(s.cx + s.ro * Math.cos(s.a0)) + " " + nf(s.cy + s.ro * Math.sin(s.a0))
+              + "A" + nf(s.ro) + " " + nf(s.ro) + " 0 " + big + " 1 "
+              + nf(s.cx + s.ro * Math.cos(s.a1)) + " " + nf(s.cy + s.ro * Math.sin(s.a1))
+        if (s.ri > 0.5)
+            d += "L" + nf(s.cx + s.ri * Math.cos(s.a1)) + " " + nf(s.cy + s.ri * Math.sin(s.a1))
+               + "A" + nf(s.ri) + " " + nf(s.ri) + " 0 " + big + " 0 "
+               + nf(s.cx + s.ri * Math.cos(s.a0)) + " " + nf(s.cy + s.ri * Math.sin(s.a0))
+        else d += "L" + nf(s.cx) + " " + nf(s.cy)
+        return d + "Z"
     }
 
     // ----------------------------------------------------------------- drawing
@@ -824,6 +967,23 @@ Item {
 
         ctx.lineCap = "round"
         ctx.lineJoin = "round"
+
+        // ---- clade highlights (shaded backgrounds)
+        var hlKeys = Object.keys(root.highlights)
+        if (hlKeys.length > 0) {
+            var hsy = v.bh * z * root.yStretch, hrows = Math.max(Lr.leafCount - 1, 1)
+            var hg = { PX: PX, PY: PY, R: zr, cx: ccx, cy: ccy, lw: v.lw || 0, rowH: rowPx,
+                       xr: alignX + (v.lw || 0) + 4,
+                       rowY: function (yy) { return v.cy + root.panY + (yy / hrows - 0.5) * hsy } }
+            ctx.globalAlpha = 0.6
+            for (var hi = 0; hi < hlKeys.length; hi++) {
+                var hn = parseInt(hlKeys[hi])
+                if (!Lr.visMask[hn] || lod[hn]) continue
+                ctx.fillStyle = root.highlights[hlKeys[hi]]
+                fillShape(ctx, hlShape(hn, hg))
+            }
+            ctx.globalAlpha = 1
+        }
 
         // ---- alignment guides
         if (align && !lite) {
@@ -1154,6 +1314,305 @@ Item {
         }
     }
 
+    // ------------------------------------------------------------ figure export
+    function xmlEsc(s) {
+        return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
+    }
+
+    // Builds a standalone SVG of the WHOLE tree (not the current viewport) at a
+    // readable row spacing, using the current layout / colours / display options.
+    // opts: { selection: bool (include search matches, picks, selected clade),
+    //         rasterFonts: bool (single font family, for the SVG->PDF/PNG renderer) }
+    function buildSvg(opts) {
+        if (!root.pT) return ""
+        opts = opts || {}
+        if (root.layoutDirty || !root.pL) computeLayout()
+        var Lr = root.pL, t = root.pT, cat = root.cat, col = root.collapsed
+        var vis = Lr.vis, par = t.par, ch = t.children, n = t.n
+        var kind = Lr.kind, polar = (kind === "circular" || kind === "radial")
+        var fs = root.fontSize, L = Math.max(Lr.leafCount, 1)
+        var withSel = opts.selection === true
+        var branchStr = root.branchColor.toString()
+        var align = root.alignTips && kind !== "radial"
+        var rowH = root.showTips ? Math.max(fs * 1.4, 4) : Math.max(2, Math.min(10, 900 / L))
+        var pad = 30, treeW = 900
+
+        tm.text = t.longest || ""
+        var lw = root.showTips ? tm.width + 14 : 0
+        var hasScale = root.showScale && Lr.useLen
+
+        // legend size
+        var legend = null, legendW = 0
+        if (cat && cat.labels.length > 0) {
+            var nShow = Math.min(cat.labels.length, 40), mw = 70
+            for (var q = 0; q < nShow; q++) {
+                tm.text = cat.labels[q] + "  (" + cat.counts[q] + ")"
+                if (tm.width > mw) mw = tm.width
+            }
+            legend = { n: nShow, w: mw + 46, rh: fs + 7 }
+            legendW = legend.w + 24
+        }
+
+        // canvas size and projection
+        var R = 0, W, H, cx = 0, cy = 0
+        var barSpace = hasScale ? 44 : 0
+        if (!polar) {
+            W = pad * 2 + treeW + lw + legendW
+            H = pad * 2 + L * rowH + barSpace
+        } else {
+            R = Math.max(220, Math.min(6000, L * rowH / (2 * Math.PI)))
+            cx = pad + R + lw
+            cy = cx
+            W = 2 * cx + legendW
+            H = 2 * cy + barSpace
+        }
+        W = Math.round(W); H = Math.round(H)
+
+        var PX = new Float64Array(n), PY = new Float64Array(n)
+        for (var k = 0; k < vis.length; k++) {
+            var i = vis[k]
+            if (polar) { PX[i] = cx + Lr.U[i] * R; PY[i] = cy + Lr.V[i] * R }
+            else { PX[i] = pad + Lr.U[i] * treeW; PY[i] = pad + (Lr.Y[i] + 0.5) * rowH }
+        }
+
+        function colOf(idx) {
+            var c = branchStr
+            if (cat) {
+                var cc = cat.nodeCat[idx]
+                if (cc >= 0 && (root.colorBranches || ch[idx].length === 0 || col[idx] === true)) c = cat.colors[cc]
+            }
+            return c
+        }
+        function edgeD(idx) {
+            var a = par[idx], x0 = PX[a], y0 = PY[a], x1 = PX[idx], y1 = PY[idx]
+            if (kind === "circular") {
+                var an = Lr.ANG[idx], ap = Lr.ANG[a], rp = Lr.RAD[a] * R, ri = Lr.RAD[idx] * R
+                var d = "M" + nf(cx + rp * Math.cos(ap)) + " " + nf(cy + rp * Math.sin(ap))
+                if (rp > 0.5 && an !== ap)
+                    d += "A" + nf(rp) + " " + nf(rp) + " 0 0 " + (an > ap ? 1 : 0) + " "
+                         + nf(cx + rp * Math.cos(an)) + " " + nf(cy + rp * Math.sin(an))
+                return d + "L" + nf(cx + ri * Math.cos(an)) + " " + nf(cy + ri * Math.sin(an))
+            }
+            if (kind === "rectangular")
+                return "M" + nf(x0) + " " + nf(y0) + "L" + nf(x0) + " " + nf(y1) + "L" + nf(x1) + " " + nf(y1)
+            return "M" + nf(x0) + " " + nf(y0) + "L" + nf(x1) + " " + nf(y1)
+        }
+
+        var fam = root.appFont
+        var base = (!fam || fam === "sans-serif") ? "sans-serif" : fam
+        var famAttr = opts.rasterFonts ? base
+                    : (base === "sans-serif" ? "Arial, Helvetica, sans-serif" : base + ", Arial, Helvetica, sans-serif")
+
+        var out = []
+        out.push('<?xml version="1.0" encoding="UTF-8"?>')
+        out.push('<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '">')
+        out.push('<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="#ffffff"/>')
+
+        // ---- clade highlights
+        var hlKeys = Object.keys(root.highlights)
+        if (hlKeys.length > 0) {
+            var hg = { PX: PX, PY: PY, R: R, cx: cx, cy: cy, lw: lw, rowH: rowH,
+                       xr: pad + treeW + lw + 6, rowY: function (yy) { return pad + (yy + 0.5) * rowH } }
+            out.push('<g fill-opacity="0.6">')
+            for (var hi = 0; hi < hlKeys.length; hi++) {
+                var hn = parseInt(hlKeys[hi])
+                if (!Lr.visMask[hn]) continue
+                out.push('<path d="' + shapePath(hlShape(hn, hg)) + '" fill="' + root.highlights[hlKeys[hi]] + '"/>')
+            }
+            out.push('</g>')
+        }
+
+        // ---- alignment guides
+        if (align) {
+            var gd = []
+            for (var g = 0; g < vis.length; g++) {
+                var gi = vis[g]
+                if (ch[gi].length !== 0) continue
+                var ex = kind === "circular" ? cx + R * Math.cos(Lr.ANG[gi]) : pad + treeW
+                var ey = kind === "circular" ? cy + R * Math.sin(Lr.ANG[gi]) : PY[gi]
+                if (Math.abs(ex - PX[gi]) + Math.abs(ey - PY[gi]) < 3) continue
+                gd.push("M" + nf(PX[gi]) + " " + nf(PY[gi]) + "L" + nf(ex) + " " + nf(ey))
+            }
+            if (gd.length) out.push('<path d="' + gd.join("") + '" fill="none" stroke="#d7dce2" stroke-width="0.8"/>')
+        }
+
+        // ---- edges, one path per colour
+        var buckets = {}, keys = []
+        for (var e = 1; e < vis.length; e++) {
+            var ei = vis[e], c = colOf(ei)
+            if (!buckets[c]) { buckets[c] = []; keys.push(c) }
+            buckets[c].push(edgeD(ei))
+        }
+        out.push('<g fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="' + nf(root.lineWidth) + '">')
+        for (var b = 0; b < keys.length; b++)
+            out.push('<path d="' + buckets[keys[b]].join("") + '" stroke="' + keys[b] + '"/>')
+        out.push('</g>')
+
+        // ---- selected clade (optional)
+        var sel = root.selIndex
+        if (withSel && sel > 0 && Lr.visMask[sel]) {
+            var sd = [], selEnd = sel + t.size[sel]
+            for (var sv = 0; sv < vis.length; sv++) {
+                var si = vis[sv]
+                if (si >= sel && si < selEnd && si > 0) sd.push(edgeD(si))
+            }
+            out.push('<path d="' + sd.join("") + '" fill="none" stroke="#2f6fed" stroke-width="' + nf(root.lineWidth + 1.5)
+                     + '" stroke-linecap="round" stroke-linejoin="round"/>')
+        }
+
+        // ---- collapsed clades as triangles
+        for (var cI = 0; cI < vis.length; cI++) {
+            var ci = vis[cI]
+            if (col[ci] !== true || ch[ci].length === 0) continue
+            var ang = polar ? Lr.ANG[ci] : 0
+            var half = polar ? 9 : rowH * 0.42
+            var tdx = Math.cos(ang), tdy = Math.sin(ang), tnx = -tdy, tny = tdx, tl = 26
+            var tcol = (cat && cat.nodeCat[ci] >= 0) ? cat.colors[cat.nodeCat[ci]] : "#8b96a3"
+            out.push('<path d="M' + nf(PX[ci]) + " " + nf(PY[ci])
+                     + "L" + nf(PX[ci] + tdx * tl + tnx * half) + " " + nf(PY[ci] + tdy * tl + tny * half)
+                     + "L" + nf(PX[ci] + tdx * tl - tnx * half) + " " + nf(PY[ci] + tdy * tl - tny * half)
+                     + 'Z" fill="' + tcol + '" fill-opacity="0.85"/>')
+        }
+
+        // ---- internal node dots
+        if (root.showNodeDots) {
+            var dd = []
+            for (var dI = 1; dI < vis.length; dI++) {
+                var di = vis[dI]
+                if (ch[di].length === 0 || col[di] === true) continue
+                dd.push("M" + nf(PX[di] - 2.6) + " " + nf(PY[di]) + "a2.6 2.6 0 1 0 5.2 0a2.6 2.6 0 1 0 -5.2 0")
+            }
+            if (dd.length) out.push('<path d="' + dd.join("") + '" fill="' + branchStr + '"/>')
+        }
+
+        // ---- support values and branch lengths
+        var sfs = Math.max(8, fs - 2)
+        if (root.showSupport || root.showLengths) {
+            out.push('<g font-family="' + xmlEsc(famAttr) + '" font-size="' + nf(sfs) + '" fill="#6b7480">')
+            for (var u = 1; u < vis.length; u++) {
+                var ui = vis[u], px1 = PX[ui], py1 = PY[ui], pp = par[ui]
+                if (root.showSupport && t.support[ui] === t.support[ui] && ch[ui].length > 0 && col[ui] !== true)
+                    out.push('<text x="' + nf(px1 - 3) + '" y="' + nf(py1 - 2 - sfs * 0.2) + '" text-anchor="end">'
+                             + String(Math.round(t.support[ui] * 100) / 100) + '</text>')
+                if (root.showLengths && t.len[ui] > 0) {
+                    var lt = String(parseFloat(t.len[ui].toPrecision(3))), mxx, myy, segPx
+                    if (kind === "circular") {
+                        var rm = (Lr.RAD[pp] + Lr.RAD[ui]) / 2 * R
+                        mxx = cx + rm * Math.cos(Lr.ANG[ui]); myy = cy + rm * Math.sin(Lr.ANG[ui])
+                        segPx = (Lr.RAD[ui] - Lr.RAD[pp]) * R;
+                    } else if (kind === "rectangular") {
+                        mxx = (PX[pp] + px1) / 2; myy = py1 - 2; segPx = px1 - PX[pp]
+                    } else {
+                        mxx = (PX[pp] + px1) / 2; myy = (PY[pp] + py1) / 2 - 2
+                        segPx = Math.sqrt((px1 - PX[pp]) * (px1 - PX[pp]) + (py1 - PY[pp]) * (py1 - PY[pp]))
+                    }
+                    if (segPx > lt.length * fs * 0.55 + 6)
+                        out.push('<text x="' + nf(mxx) + '" y="' + nf(myy - sfs * 0.2) + '" text-anchor="middle">' + lt + '</text>')
+                }
+            }
+            out.push('</g>')
+        }
+
+        // ---- search match markers and picked tips (optional)
+        if (withSel) {
+            var mk = []
+            if (root.matchFlags)
+                for (var mi = 0; mi < root.matchList.length; mi++) {
+                    var mIdx = root.matchList[mi]
+                    if (Lr.visMask[mIdx]) mk.push("M" + nf(PX[mIdx] - 4.5) + " " + nf(PY[mIdx]) + "a4.5 4.5 0 1 0 9 0a4.5 4.5 0 1 0 -9 0")
+                }
+            if (mk.length) out.push('<path d="' + mk.join("") + '" fill="#ffd54a" stroke="#b58900" stroke-width="1"/>')
+            var pk = []
+            if (root.pickedFlags && root.pickedCount > 0)
+                for (var pi = 0; pi < t.tipList.length; pi++) {
+                    var pIdx = t.tipList[pi]
+                    if (root.pickedFlags[pIdx] && Lr.visMask[pIdx])
+                        pk.push("M" + nf(PX[pIdx] - 5) + " " + nf(PY[pIdx]) + "a5 5 0 1 0 10 0a5 5 0 1 0 -10 0")
+                }
+            if (pk.length) out.push('<path d="' + pk.join("") + '" fill="#2f6fed" fill-opacity="0.25" stroke="#2f6fed" stroke-width="1.5"/>')
+        }
+
+        // ---- labels
+        out.push('<g font-family="' + xmlEsc(famAttr) + '" font-size="' + nf(fs) + '">')
+        var baseY = nf(fs * 0.35)
+        for (var l = 0; l < vis.length; l++) {
+            var li = vis[l]
+            var coll = col[li] === true && ch[li].length > 0
+            if (ch[li].length !== 0 && !coll) continue
+            if (!coll && !root.showTips) continue
+            var txt = coll ? ((t.names[li] ? t.names[li] + " " : "") + "(" + t.tips[li] + " tips)") : t.names[li]
+            if (!txt) continue
+            var isM = withSel && root.matchFlags && root.matchFlags[li] === 1
+            var isP = withSel && root.pickedFlags && root.pickedFlags[li] === 1
+            var ax = PX[li], ay = PY[li], a = polar ? Lr.ANG[li] : 0
+            if (!coll && align) {
+                if (kind === "circular") { ax = cx + R * Math.cos(a); ay = cy + R * Math.sin(a) }
+                else ax = pad + treeW
+            }
+            var off = 6 + (coll ? 26 : 0)
+            var lx = ax + Math.cos(a) * off, ly = ay + Math.sin(a) * off
+            var flip = polar && Math.cos(a) < 0
+            var tcolor = coll ? "#4a5560" : "#1c2128"
+            if (cat && cat.nodeCat[li] >= 0) tcolor = cat.colors[cat.nodeCat[li]]
+            var bg = null
+            if (isM) { bg = "#ffd54a"; tcolor = "#000000" }
+            if (isP) { bg = "#bcd3ff"; tcolor = "#0b2a6b" }
+            var tw = 0
+            if (bg) { tm.text = txt; tw = tm.width }
+            if (polar) {
+                var tr = 'translate(' + nf(lx) + ' ' + nf(ly) + ') rotate(' + nf((flip ? a + Math.PI : a) * 180 / Math.PI) + ')'
+                if (bg)
+                    out.push('<rect transform="' + tr + '" x="' + nf(flip ? -tw - 2 : -2) + '" y="' + nf(-fs / 2 - 2)
+                             + '" width="' + nf(tw + 4) + '" height="' + nf(fs + 4) + '" fill="' + bg + '"/>')
+                out.push('<text transform="' + tr + '" x="0" y="' + baseY + '" fill="' + tcolor + '"'
+                         + (flip ? ' text-anchor="end"' : '') + '>' + xmlEsc(txt) + '</text>')
+            } else {
+                if (bg)
+                    out.push('<rect x="' + nf(lx - 2) + '" y="' + nf(ly - fs / 2 - 2) + '" width="' + nf(tw + 4)
+                             + '" height="' + nf(fs + 4) + '" fill="' + bg + '"/>')
+                out.push('<text x="' + nf(lx) + '" y="' + nf(ly + fs * 0.35) + '" fill="' + tcolor + '">' + xmlEsc(txt) + '</text>')
+            }
+        }
+        out.push('</g>')
+
+        // ---- scale bar
+        if (hasScale) {
+            var pxUnit = kind === "circular" ? R / Lr.maxDepth : (kind === "radial" ? R / Lr.half : treeW / Lr.maxDepth)
+            var raw = 110 / pxUnit
+            var p10 = Math.pow(10, Math.floor(Math.log(raw) / Math.LN10)), mm = raw / p10
+            var nice = (mm < 1.5 ? 1 : (mm < 3.5 ? 2 : (mm < 7.5 ? 5 : 10))) * p10
+            var barW = nice * pxUnit, bx = pad, by = H - 26
+            out.push('<path d="M' + nf(bx) + " " + nf(by) + "H" + nf(bx + barW) + "M" + nf(bx) + " " + nf(by - 4) + "V" + nf(by + 4)
+                     + "M" + nf(bx + barW) + " " + nf(by - 4) + "V" + nf(by + 4) + '" fill="none" stroke="#4a5560" stroke-width="1.5"/>')
+            out.push('<text x="' + nf(bx) + '" y="' + nf(by + 8 + fs * 0.8) + '" font-family="' + xmlEsc(famAttr) + '" font-size="'
+                     + nf(Math.max(9, fs - 1)) + '" fill="#4a5560">' + String(parseFloat(nice.toPrecision(3))) + '</text>')
+        }
+
+        // ---- legend (to the right of the figure, never over the tree)
+        if (legend) {
+            var lx0 = W - legendW, ly0 = pad
+            var lh = 34 + legend.n * legend.rh + (cat.labels.length > legend.n ? legend.rh : 0)
+            out.push('<g font-family="' + xmlEsc(famAttr) + '" font-size="' + nf(fs) + '">')
+            out.push('<rect x="' + nf(lx0) + '" y="' + nf(ly0) + '" width="' + nf(legend.w) + '" height="' + nf(lh)
+                     + '" rx="8" fill="#ffffff" stroke="#d9dde3"/>')
+            out.push('<text x="' + nf(lx0 + 14) + '" y="' + nf(ly0 + 16 + fs * 0.35) + '" font-weight="bold" fill="#1c2128">'
+                     + xmlEsc(root.colorColumn !== "" ? root.colorColumn : "Legend") + '</text>')
+            for (var r = 0; r < legend.n; r++) {
+                var ry = ly0 + 34 + r * legend.rh + legend.rh / 2 - 2
+                out.push('<rect x="' + nf(lx0 + 14) + '" y="' + nf(ry - 5) + '" width="11" height="11" fill="' + cat.colors[r] + '"/>')
+                out.push('<text x="' + nf(lx0 + 32) + '" y="' + nf(ry + fs * 0.35) + '" fill="#4a5560">'
+                         + xmlEsc(cat.labels[r] + "  (" + cat.counts[r] + ")") + '</text>')
+            }
+            if (cat.labels.length > legend.n)
+                out.push('<text x="' + nf(lx0 + 14) + '" y="' + nf(ly0 + 34 + legend.n * legend.rh + legend.rh / 2 + fs * 0.35 - 2)
+                         + '" fill="#8a94a0">+ ' + (cat.labels.length - legend.n) + ' more</text>')
+            out.push('</g>')
+        }
+
+        out.push('</svg>')
+        return out.join("\n")
+    }
+
     // ------------------------------------------------------------------ canvas
     TextMetrics { id: tm; font.pixelSize: root.fontSize; font.family: root.appFont }
 
@@ -1292,7 +1751,7 @@ Item {
         onDoubleTapped: (point) => root.handleTap(point.position.x, point.position.y, "double")
     }
     TapHandler {
-        acceptedModifiers: Qt.ControlModifier
+        acceptedModifiers: Qt.ControlModifier      // Command on macOS
         onTapped: (point) => { root.forceActiveFocus(); root.handleTap(point.position.x, point.position.y, "additive") }
     }
     TapHandler {
@@ -1366,14 +1825,18 @@ Item {
                onClicked: root.zoomBack() }
     }
 
-    Chip {
+    Row {
         anchors.top: parent.top
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.topMargin: 14
-        visible: root.collapsedCount > 0
-        label: "Expand all  (" + root.collapsedCount + " collapsed)"
-        fontPx: 12
-        onClicked: root.expandAll()
+        spacing: 8
+        visible: root.pT !== null
+        Chip { visible: root.canUndo; label: "↶ Undo edit"; fontPx: 12
+               tip: "Undo the last reroot / extract  (Ctrl+Z)"; onClicked: root.undoRequested() }
+        Chip { visible: root.collapsedCount > 0; label: "Expand all  (" + root.collapsedCount + " collapsed)"; fontPx: 12
+               onClicked: root.expandAll() }
+        Chip { visible: root.highlightCount > 0; label: "Clear highlights  (" + root.highlightCount + ")"; fontPx: 12
+               onClicked: root.clearHighlights() }
     }
 
     Rectangle {
@@ -1382,15 +1845,17 @@ Item {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 16
-        width: selRow.implicitWidth + 24
-        height: 46
+        width: Math.min(root.width - 32, 620)
+        height: selCol.implicitHeight + 22
         radius: 10
         color: "#ffffff"
         border.color: "#d9dde3"
-        RowLayout {
-            id: selRow
-            anchors.centerIn: parent
+
+        ColumnLayout {
+            id: selCol
+            anchors { left: parent.left; right: parent.right; top: parent.top; margins: 11 }
             spacing: 8
+
             Text {
                 text: root.pickedCount > 0
                       ? root.pickedCount + (root.pickedCount === 1 ? " label picked" : " labels picked")
@@ -1398,15 +1863,59 @@ Item {
                 font.pixelSize: 13
                 font.bold: true
                 color: root.pickedCount > 0 ? "#2f6fed" : "#1c2128"
-                Layout.maximumWidth: 260
+                Layout.fillWidth: true
                 elide: Text.ElideMiddle
             }
-            Chip { visible: root.selIsInternal && root.pickedCount === 0
-                   label: root.selIsCollapsed ? "Expand" : "Collapse"; fontPx: 12; onClicked: root.toggleSelected() }
-            Chip { visible: root.selIndex > 0 && root.pickedCount === 0
-                   label: "Parent"; fontPx: 12; onClicked: root.selectParent() }
-            Chip { label: "Copy"; fontPx: 12; tip: "Copy label(s) — Ctrl/Cmd+C"; onClicked: root.copyLabels() }
-            Chip { label: "✕"; fontPx: 12; onClicked: root.clearAll() }
+
+            Flow {
+                Layout.fillWidth: true
+                spacing: 6
+                visible: !root.hlOpen
+                Chip { visible: root.selIsInternal && root.pickedCount === 0
+                       label: root.selIsCollapsed ? "Expand" : "Collapse"; fontPx: 12; onClicked: root.toggleSelected() }
+                Chip { visible: root.selIndex >= 0 && root.pickedCount === 0
+                       label: "Highlight"; fontPx: 12; on: root.highlights[root.selIndex] !== undefined
+                       tip: "Shade the background behind this clade"; onClicked: root.hlOpen = true }
+                Chip { visible: root.selIndex > 0 && root.pickedCount === 0
+                       label: "Reroot"; fontPx: 12; tip: "Place the root on the branch above this node"
+                       onClicked: root.rerootRequested(root.selIndex) }
+                Chip { visible: root.selIsInternal && root.pickedCount === 0
+                       label: "Extract clade"; fontPx: 12; tip: "Replace the tree with just this clade (undoable)"
+                       onClicked: root.extractRequested(root.selIndex) }
+                Chip { visible: root.selIsInternal && root.pickedCount === 0
+                       label: "Open in new window"; fontPx: 12; tip: "Open this clade as its own tree in a new window"
+                       onClicked: root.newWindowRequested(root.selIndex) }
+                Chip { visible: root.selIndex > 0 && root.pickedCount === 0
+                       label: "Parent"; fontPx: 12; onClicked: root.selectParent() }
+                Chip { label: "Copy"; fontPx: 12; tip: "Copy label(s) — Ctrl/Cmd+C"; onClicked: root.copyLabels() }
+                Chip { label: "✕"; fontPx: 12; onClicked: root.clearAll() }
+            }
+
+            Flow {
+                Layout.fillWidth: true
+                spacing: 8
+                visible: root.hlOpen
+                Repeater {
+                    model: ["#fde68a", "#bfdbfe", "#bbf7d0", "#fecdd3", "#ddd6fe", "#fed7aa", "#a5f3fc", "#e5e7eb"]
+                    delegate: Rectangle {
+                        required property string modelData
+                        width: 28; height: 28; radius: 7
+                        color: modelData
+                        border.color: swMa.containsMouse ? "#2f6fed" : "#b9c0c9"
+                        border.width: swMa.containsMouse ? 2 : 1
+                        MouseArea {
+                            id: swMa
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: { root.highlightSelected(parent.modelData); root.hlOpen = false }
+                        }
+                    }
+                }
+                Chip { label: "Remove"; fontPx: 12; visible: root.highlights[root.selIndex] !== undefined
+                       onClicked: { root.unhighlightSelected(); root.hlOpen = false } }
+                Chip { label: "Cancel"; fontPx: 12; onClicked: root.hlOpen = false }
+            }
         }
     }
 }
