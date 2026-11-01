@@ -2,7 +2,6 @@ build/
 .qtcreator/
 bin/
 # build outputs
-build/
 build-*/
 out/
 CMakeFiles/

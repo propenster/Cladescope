@@ -12,7 +12,7 @@ ApplicationWindow {
     minimumWidth: 900
     minimumHeight: 560
     visible: true
-    title: "cladescope" + (treeModel.fileName !== "" ? " — " + treeModel.fileName : "")
+    title: "Cladescope" + (treeModel.fileName !== "" ? " — " + treeModel.fileName : "")
     color: "#f6f7f9"
 
     readonly property bool hasTree: treeModel.fileName !== ""
