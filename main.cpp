@@ -12,8 +12,8 @@ int main(int argc, char *argv[])
     qputenv("QT_QUICK_CONTROLS_STYLE", "Basic");
 
     QGuiApplication app(argc, argv);
-    app.setOrganizationName("qTree");
-    app.setApplicationName("qTree");
+    app.setOrganizationName("cladescope");
+    app.setApplicationName("cladescope");
 
     // Honour the user's saved graphics backend (must precede window creation).
     AppBridge::applyStartupBackend();
@@ -25,7 +25,7 @@ int main(int argc, char *argv[])
         startFile = QFileInfo(args.at(1)).absoluteFilePath();
 
     QQmlApplicationEngine engine;
-    qmlRegisterType<TreeModel>("com.qtree.backend", 1, 0, "TreeModel");
+    qmlRegisterType<TreeModel>("com.cladescope.backend", 1, 0, "TreeModel");
 
     AppBridge bridge(startFile);
     engine.rootContext()->setContextProperty("appBridge", &bridge);
@@ -36,7 +36,7 @@ int main(int argc, char *argv[])
         &app,
         []() { QCoreApplication::exit(-1); },
         Qt::QueuedConnection);
-    engine.loadFromModule("quickTree", "Main");
+    engine.loadFromModule("cladescope", "Main");
 
     if (!engine.rootObjects().isEmpty()) {
         if (auto *win = qobject_cast<QQuickWindow *>(engine.rootObjects().first()))

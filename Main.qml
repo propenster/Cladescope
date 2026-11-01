@@ -3,7 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Effects
 import QtQuick.Dialogs
-import com.qtree.backend 1.0
+import com.cladescope.backend 1.0
 
 ApplicationWindow {
     id: window
@@ -12,7 +12,7 @@ ApplicationWindow {
     minimumWidth: 900
     minimumHeight: 560
     visible: true
-    title: "qTree" + (treeModel.fileName !== "" ? " — " + treeModel.fileName : "")
+    title: "cladescope" + (treeModel.fileName !== "" ? " — " + treeModel.fileName : "")
     color: "#f6f7f9"
 
     readonly property bool hasTree: treeModel.fileName !== ""
@@ -69,7 +69,7 @@ ApplicationWindow {
     // ---------------------------------------------------------------- DIALOGS
     MessageDialog {
         id: errorDialog
-        title: "qTree"
+        title: "cladescope"
         text: "Unknown error"
         buttons: MessageDialog.Ok
     }
@@ -495,7 +495,7 @@ ApplicationWindow {
                             layer.effect: MultiEffect { colorization: 1.0; colorizationColor: "#212121" }
                         }
                         Text {
-                            text: "qTree"
+                            text: "cladescope"
                             font.pixelSize: 42
                             font.bold: true
                             color: "#212121"
@@ -504,7 +504,7 @@ ApplicationWindow {
                     }
 
                     Text {
-                        text: "Welcome to qTree: Next-Gen Phylogenetics"
+                        text: "Welcome to cladescope: Next-Gen Phylogenetics"
                         font.pixelSize: 28
                         color: "#6c757d"
                         Layout.fillWidth: true // Ensure it knows to wrap within the column

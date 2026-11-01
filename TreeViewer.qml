@@ -118,6 +118,7 @@ Item {
         property bool showSupport: false
         property bool showLengths: false
         property bool performanceMode: false
+        property bool breakLongBranches: true
         property string renderMode: "auto"          // auto | gpu | cpu
 
         property string searchQuery: ""
@@ -153,6 +154,7 @@ Item {
             fontSize = 12; lineWidth = 1.5; branchColor = "#333a44"; treeFont = ""
             showTips = true; alignTips = false; showNodeDots = false; showScale = true
             showSupport = false; showLengths = false; performanceMode = false
+            breakLongBranches = true
             colorBranches = true
             fitView()
         }
@@ -223,6 +225,7 @@ Item {
                 showSupport: vs.showSupport
                 showLengths: vs.showLengths
                 performanceMode: vs.performanceMode
+                breakLongBranches: vs.breakLongBranches
                 gpuCanvas: root.useGpu
                 searchQuery: vs.searchQuery
                 searchRegex: vs.searchRegex
@@ -245,6 +248,7 @@ Item {
                 onExtractRequested: (node) => { if (root.treeModel) root.treeModel.extractClade(node) }
                 onNewWindowRequested: (node) => root.openCladeInNewWindow(node)
                 onUndoRequested: root.undo()
+                onBreakToggled: (enabled) => vs.breakLongBranches = enabled
             }
         }
 

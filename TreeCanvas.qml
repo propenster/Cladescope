@@ -33,6 +33,9 @@ Item {
     property var metadata: null                 // TreeModel.metadata (columns aligned to node index)
     property string colorColumn: ""             // "" = tip names, else the name of a metadata column
     property bool canUndo: false
+    property bool breakLongBranches: true       // compress branches that dominate the axis
+    property int breakCount: 0                  // output: branches currently compressed
+    property int breakCandidates: 0             // output: branches that would be compressed
 
     // ----------------------------------------------------------------- outputs
     property int matchCount: 0
@@ -63,6 +66,7 @@ Item {
     signal extractRequested(int node)
     signal newWindowRequested(int node)
     signal undoRequested()
+    signal breakToggled(bool enabled)
 
     // ---------------------------------------------------------- internal state
     property var pT: null             // prepared tree (typed arrays)
@@ -108,7 +112,7 @@ Item {
                               appFont, zoomFactor, panX, panY, yStretch]
     on_PaintDepsChanged: canvas.requestPaint()
 
-    property var _layoutDeps: [layoutType, useBranchLengths, ladderize]
+    property var _layoutDeps: [layoutType, useBranchLengths, ladderize, breakLongBranches]
     on_LayoutDepsChanged: {
         layoutDirty = true
         if (pT && !firstRenderPending) announceLayout = true
@@ -671,11 +675,36 @@ Item {
         // depth (phylogram) or aligned height (cladogram)
         var useLen = root.useBranchLengths && t.hasLengths
         var depth = new Float64Array(n), maxDepth = 0
+        var brkFlag = null, brkList = [], brkCand = 0
         if (useLen) {
             for (var a2 = 1; a2 < m; a2++) {
                 var q = vis[a2]
                 depth[q] = depth[par[q]] + t.len[q]
                 if (depth[q] > maxDepth) maxDepth = depth[q]
+            }
+            // A branch longer than half the whole plot (e.g. one tip with a bad date)
+            // leaves the real tree squeezed into a sliver. Shorten such branches to a
+            // stub and mark them with a break symbol.
+            var thr = maxDepth * 0.5
+            for (var b1 = 1; b1 < m; b1++) if (t.len[vis[b1]] > thr) brkCand++
+            if (brkCand > 0 && root.breakLongBranches) {
+                var d0 = new Float64Array(n), rest = 0
+                brkFlag = new Uint8Array(n)
+                for (var b2 = 1; b2 < m; b2++) {
+                    var q0 = vis[b2], l0 = t.len[q0]
+                    if (l0 > thr) { brkFlag[q0] = 1; brkList.push(q0); l0 = 0 }
+                    d0[q0] = d0[par[q0]] + l0
+                    if (d0[q0] > rest) rest = d0[q0]
+                }
+                if (rest > 0) {
+                    var cap = rest * 0.2
+                    maxDepth = 0
+                    for (var b3 = 1; b3 < m; b3++) {
+                        var q1 = vis[b3]
+                        depth[q1] = depth[par[q1]] + (brkFlag[q1] ? cap : t.len[q1])
+                        if (depth[q1] > maxDepth) maxDepth = depth[q1]
+                    }
+                } else { brkFlag = null; brkList = [] }
             }
         } else {
             var hgt = new Float64Array(n)
@@ -770,8 +799,10 @@ Item {
         root.pL = { kind: kind, vis: vis, visMask: mask, U: U, V: V, Y: Y, ANG: ANG, RAD: RAD,
                     Ymin: Ymin, Ymax: Ymax, Dmax: Dmax, lod: new Uint8Array(n),
                     A0: (typeof a0 !== "undefined") ? a0 : null, A1: (typeof a1 !== "undefined") ? a1 : null,
-                    PX: new Float64Array(n), PY: new Float64Array(n),
+                    PX: new Float64Array(n), PY: new Float64Array(n), broken: brkFlag, brkList: brkList,
                     leafCount: leaves, maxDepth: maxDepth, useLen: useLen, half: half }
+        root.breakCount = brkList.length
+        root.breakCandidates = brkCand
         root.leafCount = leaves
         root.nodeCount = m
         root.layoutDirty = false
@@ -871,6 +902,29 @@ Item {
     }
 
     function nf(x) { return String(Math.round(x * 100) / 100) }
+
+    // Centre and direction of a compressed branch, and the strokes of its "//" mark.
+    // g = { PX, PY, cx, cy, R }
+    function breakGeom(i, g) {
+        var Lr = root.pL, a = root.pT.par[i], x, y, th
+        if (Lr.kind === "circular") {
+            var rm = (Lr.RAD[a] + Lr.RAD[i]) / 2 * g.R
+            th = Lr.ANG[i]
+            x = g.cx + rm * Math.cos(th); y = g.cy + rm * Math.sin(th)
+        } else if (Lr.kind === "rectangular") {
+            x = (g.PX[a] + g.PX[i]) / 2; y = g.PY[i]; th = 0
+        } else {
+            x = (g.PX[a] + g.PX[i]) / 2; y = (g.PY[a] + g.PY[i]) / 2
+            th = Math.atan2(g.PY[i] - g.PY[a], g.PX[i] - g.PX[a])
+        }
+        var dx = Math.cos(th), dy = Math.sin(th), ux = Math.cos(th - 1.05), uy = Math.sin(th - 1.05)
+        var segs = []
+        for (var k = -1; k <= 1; k += 2) {
+            var sx = x + dx * 3.5 * k, sy = y + dy * 3.5 * k
+            segs.push([sx - ux * 7, sy - uy * 7, sx + ux * 7, sy + uy * 7])
+        }
+        return { gap: [x - dx * 7, y - dy * 7, x + dx * 7, y + dy * 7], segs: segs }
+    }
 
     function shapePath(s) {
         var T = Math.PI * 2
@@ -1076,6 +1130,28 @@ Item {
                 if (si >= sel && si < selEnd && si > 0 && !lod[si]) trace(si)
             }
             ctx.stroke()
+        }
+
+        // ---- axis-break marks on compressed branches
+        if (Lr.brkList && Lr.brkList.length > 0) {
+            var brkG = { PX: PX, PY: PY, cx: ccx, cy: ccy, R: zr }
+            for (var bkk = 0; bkk < Lr.brkList.length; bkk++) {
+                var bki = Lr.brkList[bkk]
+                if (lod[bki]) continue
+                var bkm = breakGeom(bki, brkG)
+                ctx.lineCap = "butt"
+                ctx.strokeStyle = "#ffffff"
+                ctx.lineWidth = lineW + 4
+                ctx.beginPath(); ctx.moveTo(bkm.gap[0], bkm.gap[1]); ctx.lineTo(bkm.gap[2], bkm.gap[3]); ctx.stroke()
+                ctx.strokeStyle = branchStr
+                ctx.lineWidth = Math.max(1.2, lineW)
+                ctx.beginPath()
+                for (var bks = 0; bks < bkm.segs.length; bks++) {
+                    ctx.moveTo(bkm.segs[bks][0], bkm.segs[bks][1]); ctx.lineTo(bkm.segs[bks][2], bkm.segs[bks][3])
+                }
+                ctx.stroke()
+                ctx.lineCap = "round"
+            }
         }
 
         // ---- collapsed clades as triangles
@@ -1460,6 +1536,19 @@ Item {
                      + '" stroke-linecap="round" stroke-linejoin="round"/>')
         }
 
+        // ---- axis-break marks
+        if (Lr.brkList && Lr.brkList.length > 0) {
+            var sbg = { PX: PX, PY: PY, cx: cx, cy: cy, R: R }, sgap = [], sstr = []
+            for (var sbk = 0; sbk < Lr.brkList.length; sbk++) {
+                var sgm = breakGeom(Lr.brkList[sbk], sbg)
+                sgap.push("M" + nf(sgm.gap[0]) + " " + nf(sgm.gap[1]) + "L" + nf(sgm.gap[2]) + " " + nf(sgm.gap[3]))
+                for (var ssg = 0; ssg < sgm.segs.length; ssg++)
+                    sstr.push("M" + nf(sgm.segs[ssg][0]) + " " + nf(sgm.segs[ssg][1]) + "L" + nf(sgm.segs[ssg][2]) + " " + nf(sgm.segs[ssg][3]))
+            }
+            out.push('<path d="' + sgap.join("") + '" fill="none" stroke="#ffffff" stroke-width="' + nf(root.lineWidth + 4) + '"/>')
+            out.push('<path d="' + sstr.join("") + '" fill="none" stroke="' + branchStr + '" stroke-width="' + nf(Math.max(1.2, root.lineWidth)) + '"/>')
+        }
+
         // ---- collapsed clades as triangles
         for (var cI = 0; cI < vis.length; cI++) {
             var ci = vis[cI]
@@ -1499,7 +1588,7 @@ Item {
                     if (kind === "circular") {
                         var rm = (Lr.RAD[pp] + Lr.RAD[ui]) / 2 * R
                         mxx = cx + rm * Math.cos(Lr.ANG[ui]); myy = cy + rm * Math.sin(Lr.ANG[ui])
-                        segPx = (Lr.RAD[ui] - Lr.RAD[pp]) * R;
+                        segPx = (Lr.RAD[ui] - Lr.RAD[pp]) * R
                     } else if (kind === "rectangular") {
                         mxx = (PX[pp] + px1) / 2; myy = py1 - 2; segPx = px1 - PX[pp]
                     } else {
@@ -1835,6 +1924,13 @@ Item {
                tip: "Undo the last reroot / extract  (Ctrl+Z)"; onClicked: root.undoRequested() }
         Chip { visible: root.collapsedCount > 0; label: "Expand all  (" + root.collapsedCount + " collapsed)"; fontPx: 12
                onClicked: root.expandAll() }
+        Chip { visible: root.breakCount > 0; label: "// Long branch compressed  ·  show true scale"; fontPx: 12
+               tip: "A branch longer than half the tree was shortened so the rest is readable"
+               onClicked: root.breakToggled(false) }
+        Chip { visible: root.breakCount === 0 && root.breakCandidates > 0 && !root.breakLongBranches
+               label: "Compress long branch"; fontPx: 12
+               tip: "Shorten the very long branch so the rest of the tree gets the full width"
+               onClicked: root.breakToggled(true) }
         Chip { visible: root.highlightCount > 0; label: "Clear highlights  (" + root.highlightCount + ")"; fontPx: 12
                onClicked: root.clearHighlights() }
     }

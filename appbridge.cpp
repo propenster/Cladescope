@@ -39,7 +39,7 @@ AppBridge::AppBridge(const QString &startupFile, QObject *parent)
 
 void AppBridge::applyStartupBackend()
 {
-    QSettings s("qTree", "qTree");
+    QSettings s("cladescope", "cladescope");
     const QString pref = s.value("graphics/backend", "auto").toString();
     if (pref == "opengl")
         QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
@@ -82,13 +82,13 @@ void AppBridge::updateInfo(const QString &api, const QString &gpu)
 
 QString AppBridge::backendPref() const
 {
-    QSettings s("qTree", "qTree");
+    QSettings s("cladescope", "cladescope");
     return s.value("graphics/backend", "auto").toString();
 }
 
 void AppBridge::setBackendPref(const QString &pref)
 {
-    QSettings s("qTree", "qTree");
+    QSettings s("cladescope", "cladescope");
     s.setValue("graphics/backend", pref);
     emit prefChanged();
 }
@@ -133,7 +133,7 @@ bool AppBridge::renderPdf(const QString &path, const QString &svg)
     pdf.setResolution(72);
     pdf.setPageSize(QPageSize(page, QPageSize::Point));
     pdf.setPageMargins(QMarginsF(0, 0, 0, 0));
-    pdf.setCreator("qTree");
+    pdf.setCreator("cladescope");
 
     QPainter p(&pdf);
     if (!p.isActive()) return false;
@@ -172,7 +172,7 @@ bool AppBridge::renderPng(const QString &path, const QString &svg, double scale)
 bool AppBridge::openNewWindow(const QString &newick, const QString &name)
 {
     const QString path = QDir::temp().filePath(
-        QString("qtree_%1_%2.nwk").arg(name).arg(QDateTime::currentMSecsSinceEpoch()));
+        QString("cladescope_%1_%2.nwk").arg(name).arg(QDateTime::currentMSecsSinceEpoch()));
     if (!saveText(path, newick + "\n")) return false;
     return QProcess::startDetached(QCoreApplication::applicationFilePath(), QStringList() << path);
 }

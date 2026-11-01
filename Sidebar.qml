@@ -225,6 +225,9 @@ Rectangle {
                                onToggled: root.settings.showSupport = checked }
                 ModernCheckBox { text: "Branch lengths"; checked: root.settings ? root.settings.showLengths : false
                                onToggled: root.settings.showLengths = checked }
+                ModernCheckBox { text: "Compress long branches"; Layout.columnSpan: 2
+                               checked: root.settings ? root.settings.breakLongBranches : true
+                               onToggled: root.settings.breakLongBranches = checked }
             }
 
             RowLayout {
@@ -386,7 +389,6 @@ Rectangle {
                 spacing: 6
                 Repeater {
                     model: [
-                        // { t: "Year", p: "(?:\\|(\\d{4})-\\d{2}-\\d{2}(?:\\||$))|(?:\\/(\\d{4})/)" },
                         { t: "Year", p: "((?:19|20)\\d{2})" },
                         { t: "Date", p: "(\\d{4}-\\d{2}-\\d{2})" },
                         { t: "2nd field", p: "^[^_|]+[_|]([^_|]+)" },
