@@ -21,18 +21,20 @@ qt_add_qml_module(cladescope
     URI cladescope
     QML_FILES
         Main.qml
-        RESOURCES resources.qrc
-        QML_FILES TopBar.qml
-        QML_FILES TopBars.qml
-        QML_FILES MenuButton.qml
-        SOURCES tree.h
-        SOURCES tree.cpp
-        QML_FILES TreeViewer.qml
-        QML_FILES Sidebar.qml
-        QML_FILES TreeCanvas.qml
-        QML_FILES StatusToast.qml
-        SOURCES appbridge.h
-        SOURCES appbridge.cpp
+        TopBar.qml
+        TopBars.qml
+        MenuButton.qml
+        TreeViewer.qml
+        Sidebar.qml
+        TreeCanvas.qml
+        StatusToast.qml
+    SOURCES
+        tree.h
+        tree.cpp
+        appbridge.h
+        appbridge.cpp
+    RESOURCES
+        resources.qrc
 )
 
 # Qt for iOS sets MACOSX_BUNDLE_GUI_IDENTIFIER automatically since Qt 6.1.
@@ -56,3 +58,4 @@ install(TARGETS cladescope
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
+add_subdirectory(tests/cpp)
