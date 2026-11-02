@@ -1,0 +1,6 @@
+strain,country,year,host
+A_x,Kenya,2014,swine
+B_x,Kenya,2015,swine
+C_y,Peru,2014,human
+E_z,Peru,2016,swine
+missing_tip,Chile,2016,swine

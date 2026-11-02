@@ -1,0 +1,12 @@
+delimiter--###--
+name--###--IMG Taxon Tree
+table--###--TAXON
+level--###--DOMAIN--###--VARCHAR2(255)
+level--###--PHYLUM--###--VARCHAR2(255)--###--DISTANCE2--###--NUMBER(16,3) 
+level--###--IR_CLASS--###--VARCHAR2(255)--###--DISTANCE3--###--NUMBER(16,3) 
+level--###--IR_ORDER--###--VARCHAR2(255)--###--DISTANCE4--###--NUMBER(16,3) 
+level--###--FAMILY--###--VARCHAR2(255)--###--DISTANCE5--###--NUMBER(16,3) 
+level--###--GENUS--###--VARCHAR2(100)--###--DISTANCE6--###--NUMBER(16,3) 
+level--###--SPECIES--###--VARCHAR2(100)--###--DISTANCE7--###--NUMBER(16,3) 
+level--###--TAXON_NAME--###--VARCHAR2(255)--###--DISTANCE8--###--NUMBER(16,3) 
+unique--###--TAXON_OID
