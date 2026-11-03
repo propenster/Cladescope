@@ -13,8 +13,13 @@ if (EXISTS "${CMAKE_CURRENT_LIST_DIR}/importedcontent/CMakeLists.txt")
     add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/importedcontent)
 endif()
 
+if(WIN32)
+    set(app_icon_windows "${CMAKE_CURRENT_SOURCE_DIR}/packaging/cladescope.rc")
+endif()
+
 qt_add_executable(cladescope
     main.cpp
+    ${app_icon_windows}
 )
 
 qt_add_qml_module(cladescope
@@ -37,6 +42,18 @@ qt_add_qml_module(cladescope
         resources.qrc
 )
 
+qt_add_resources(cladescope "app_icons"
+    PREFIX "/icons"
+    BASE   "${CMAKE_CURRENT_SOURCE_DIR}/ui/assets/icons"
+    FILES
+        ui/assets/icons/cladescope-C-16.png
+        ui/assets/icons/cladescope-C-32.png
+        ui/assets/icons/cladescope-C-48.png
+        ui/assets/icons/cladescope-C-64.png
+        ui/assets/icons/cladescope-C-128.png
+        ui/assets/icons/cladescope-C-256.png
+        ui/assets/icons/cladescope-C-512.png
+    )
 # Qt for iOS sets MACOSX_BUNDLE_GUI_IDENTIFIER automatically since Qt 6.1.
 # If you are developing for iOS or macOS you should consider setting an
 # explicit, fixed bundle identifier manually though.
@@ -58,4 +75,9 @@ install(TARGETS cladescope
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
-add_subdirectory(tests/cpp)
+
+option(CLADESCOPE_BUILD_TESTS "Build unit tests" ON)
+if(CLADESCOPE_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests/cpp)
+endif()

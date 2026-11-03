@@ -5,6 +5,7 @@
 #include <QQuickWindow>
 #include "tree.h"
 #include "appbridge.h"
+#include <QIcon>
 
 int main(int argc, char *argv[])
 {
@@ -14,6 +15,10 @@ int main(int argc, char *argv[])
     QGuiApplication app(argc, argv);
     app.setOrganizationName("cladescope");
     app.setApplicationName("cladescope");
+    QIcon icon;
+    for (int s : {16, 32, 48, 64, 128, 256, 512})
+        icon.addFile(QString(":/icons/cladescope-C-%1.png").arg(s), QSize(s, s));
+    app.setWindowIcon(icon);
 
     // Honour the user's saved graphics backend (must precede window creation).
     AppBridge::applyStartupBackend();

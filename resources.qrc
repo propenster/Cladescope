@@ -33,5 +33,25 @@
         <file>ui/assets/fonts/RobotoCondensed-Thin.ttf</file>
         <file>ui/assets/fonts/RobotoCondensed-ThinItalic.ttf</file>
         <file>ui/assets/icons/account_tree_24dp.svg</file>
+        <file>ui/assets/icons/cladescope-C.svg</file>
+        <file>ui/assets/icons/cladescope-C-16.png</file>
+        <file>ui/assets/icons/cladescope-C-24.png</file>
+        <file>ui/assets/icons/cladescope-C-32.png</file>
+        <file>ui/assets/icons/cladescope-C-48.png</file>
+        <file>ui/assets/icons/cladescope-C-64.png</file>
+        <file>ui/assets/icons/cladescope-C-128.png</file>
+        <file>ui/assets/icons/cladescope-C-256.png</file>
+        <file>ui/assets/icons/cladescope-C-512.png</file>
+        <file>ui/assets/icons/cladescope-C-1024.png</file>
+        <file>ui/assets/icons/cladescope-Cs-16.png</file>
+        <file>ui/assets/icons/cladescope-Cs-24.png</file>
+        <file>ui/assets/icons/cladescope-Cs-32.png</file>
+        <file>ui/assets/icons/cladescope-Cs-48.png</file>
+        <file>ui/assets/icons/cladescope-Cs-64.png</file>
+        <file>ui/assets/icons/cladescope-Cs-128.png</file>
+        <file>ui/assets/icons/cladescope-Cs-256.png</file>
+        <file>ui/assets/icons/cladescope-Cs-512.png</file>
+        <file>ui/assets/icons/cladescope-Cs-1024.png</file>
+        <file>packaging/cladescope-C.ico</file>
     </qresource>
 </RCC>
