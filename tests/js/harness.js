@@ -27,7 +27,10 @@ function grab(name) {
   for (; k < src.length; k++) { if (src[k] === '{') d++; else if (src[k] === '}' && --d === 0) break; }
   return src.slice(i, k + 1).replace('    function ', 'function ');
 }
-const NAMES = ['computeLayout', 'breakGeom', 'hlShape', 'fillShape', 'nf', 'shapePath', 'xmlEsc', 'buildSvg'];
+const NAMES = ['computeLayout', 'breakGeom', 'hlShape', 'fillShape', 'nf', 'shapePath', 'xmlEsc', 'buildSvg',
+  'columnIndex', 'isPolar', 'labelAnchor', 'refreshSelection', 'clearPicked', 'ensurePicked', 'pickClade',
+  'baseCategories', 'recomputeCategories', 'applyManualColors', 'colorPicked', 'clearManualColors',
+  'tipsInRect', 'boxSelect', 'textOn'];
 const code = NAMES.map(grab).join('\n\n');
 
 // Iterative Newick parser -> flat pre-order node list (no recursion: safe for ladder trees).
@@ -75,12 +78,19 @@ function run(pT, over, opts) {
     fontSize: 12, lineWidth: 1.5, branchColor: { toString: () => '#333a44' }, showTips: true, alignTips: false,
     showNodeDots: false, showScale: true, showSupport: false, showLengths: false, colorBranches: true,
     appFont: 'sans-serif', highlights: {}, colorColumn: '', leafCount: 0, nodeCount: 0,
-    breakLongBranches: true, breakCount: 0, breakCandidates: 0
+    breakLongBranches: true, breakCount: 0, breakCandidates: 0,
+    colorEnabled: false, colorPattern: '', metadata: null, manualGroups: [], manualCount: 0, categoryCount: 0,
+    regexError: '', selectionText: '', selIsInternal: false, selIsCollapsed: false, notes: [],
+    palette: ['#2f6fed', '#e83e8c', '#28a745', '#f59f00', '#17a2b8', '#6f42c1', '#fd7e14', '#20c997', '#dc3545', '#8d6e63'],
+    notify(msg) { this.notes.push(msg); }
   }, over || {});
   const tm = { text: '', get width() { return this.text.length * 6.5; } };
-  const f = new Function('root', 'tm', code + '\nreturn { buildSvg, computeLayout };')(root, tm);
+  const canvas = { requestPaint() {} };
+  const Qt = { hsla: (h) => ({ toString: () => 'hsl(' + Math.round(h * 360) + ',68%,46%)' }) };
+  const exportsList = NAMES.join(', ');
+  const f = new Function('root', 'tm', 'canvas', 'Qt', code + '\nreturn { ' + exportsList + ' };')(root, tm, canvas, Qt);
   const svg = f.buildSvg(opts);
-  return { svg, root };
+  return { svg, root, f };
 }
 
 // Minimal well-formedness check for the simple SVG we emit (tags balanced, no raw '&' or '<' in text).
