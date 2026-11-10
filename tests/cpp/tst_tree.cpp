@@ -1,5 +1,4 @@
-#include <QCoreApplication>
-#include <QTest>
+// Unit tests for the Cladescope tree backend (parsing, editing, metadata).
 // Built only with -DCLADESCOPE_BUILD_TESTS=ON.  Run:  ctest --output-on-failure
 // The tests check *invariants* (e.g. rerooting preserves every pairwise tip distance) plus a few
 // hand-computed values, so they do not depend on any particular internal representation.
@@ -24,9 +23,9 @@ struct Snap {
     QStringList names;
     QVector<int> parent;
     QVector<double> len;
-    QVector<int> nChildren;
+    QVector<int> nkids;
     int n() const { return names.size(); }
-    bool isTip(int i) const { return nChildren[i] == 0; }
+    bool isTip(int i) const { return nkids[i] == 0; }
 };
 
 Snap snapshot(const TreeModel &m)
@@ -36,9 +35,9 @@ Snap snapshot(const TreeModel &m)
     s.names = d.value("names").toStringList();
     for (const QVariant &v : d.value("parents").toList()) s.parent.append(v.toInt());
     for (const QVariant &v : d.value("lengths").toList()) s.len.append(v.toDouble());
-    s.nChildren.fill(0, s.names.size());
+    s.nkids.fill(0, s.names.size());
     for (int i = 0; i < s.n(); ++i)
-        if (s.parent[i] >= 0) s.nChildren[s.parent[i]]++;
+        if (s.parent[i] >= 0) s.nkids[s.parent[i]]++;
     return s;
 }
 
@@ -137,6 +136,9 @@ private slots:
     void metadataMatchesAndSurvivesEdits();
     void metadataWithNoMatchingColumnIsRejected();
     void deepLadderTreeDoesNotOverflowTheStack();
+    void readsBeastPosteriorAnnotationsAsSupport();
+    void explicitLabelBeatsAnnotationAndOtherKeysAreIgnored();
+    void compoundIqtreeLabelsSurviveParsingAndSaving();
 };
 
 void TstTree::parsesNewick()
@@ -367,6 +369,53 @@ void TstTree::deepLadderTreeDoesNotOverflowTheStack()
     m.midpointRoot();
     QCOMPARE(m.tipCount(), L);
     QVERIFY2(t.elapsed() < 60000, "deep tree handling is too slow");
+}
+
+// internal-node labels (non-empty names of nodes that have children), sorted
+static QStringList internalLabels(const Snap &s)
+{
+    QStringList out;
+    for (int i = 1; i < s.n(); ++i)          // skip the root
+        if (!s.isTip(i) && !s.names[i].isEmpty()) out << s.names[i];
+    out.sort();
+    return out;
+}
+
+void TstTree::readsBeastPosteriorAnnotationsAsSupport()
+{
+    TreeModel m;
+    QVERIFY(loadAndWait(m, fixture("beast_annot.nwk")));
+    QCOMPARE(m.tipCount(), 5);
+    const Snap s = snapshot(m);
+    // (A,B) carries posterior=0.98 (a {a,b} range before it must not confuse the parser);
+    // (C,D) carries prob=0.75; the posterior on tip D and the one on the root are not clade support.
+    QCOMPARE(internalLabels(s), (QStringList{ "0.75", "0.98" }));
+    QCOMPARE(tipNames(s), (QStringList{ "A", "B", "C", "D", "E" }));
+    QVERIFY(s.names[0].isEmpty());
+    // the value survives a save / reload round trip
+    QTemporaryDir dir; QVERIFY(dir.isValid());
+    QVERIFY(!newickText(m, dir.path()).isEmpty());
+    TreeModel again;
+    QVERIFY(loadAndWait(again, dir.path() + "/out.nwk"));
+    QCOMPARE(internalLabels(snapshot(again)), (QStringList{ "0.75", "0.98" }));
+}
+
+void TstTree::explicitLabelBeatsAnnotationAndOtherKeysAreIgnored()
+{
+    TreeModel m;
+    QVERIFY(loadAndWait(m, fixture("annot_precedence.nwk")));
+    // "90" is written as a label, so the annotation (0.5) must not replace it; the clade with only
+    // a height annotation gets no support; support="77" is recognised.
+    QCOMPARE(internalLabels(snapshot(m)), (QStringList{ "77", "90" }));
+}
+
+void TstTree::compoundIqtreeLabelsSurviveParsingAndSaving()
+{
+    TreeModel m;
+    QVERIFY(loadAndWait(m, fixture("iqtree_labels.nwk")));
+    QCOMPARE(internalLabels(snapshot(m)), (QStringList{ "100/100", "87.5/99" }));
+    QTemporaryDir dir; QVERIFY(dir.isValid());
+    QVERIFY(newickText(m, dir.path()).contains("87.5/99"));
 }
 
 QTEST_GUILESS_MAIN(TstTree)

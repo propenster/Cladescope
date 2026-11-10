@@ -60,10 +60,10 @@ Item {
     property bool zoomTool: false
     property bool selectTool: false             // drag a box to pick the tips inside it
     property bool boxIsSelect: false            // the rubber band currently drawn selects (green) instead of zooming (blue)
-    property bool fillLabels: false             // color by filling the label background (band) instead of the text
-    property bool colOpen: false                // color palette open in the selection card
+    property bool fillLabels: false             // colour by filling the label background (band) instead of the text
+    property bool colOpen: false                // colour palette open in the selection card
     property var manualGroups: []               // [{ color, label, names: [tip names] }]  (keyed by name: survives rerooting)
-    property int manualCount: 0                 // tips currently colored by hand
+    property int manualCount: 0                 // tips currently coloured by hand
 
     signal renderFinished(int ms, int tips, int nodes)
     signal notify(string text)
@@ -84,7 +84,7 @@ Item {
     property var matchList: []
     property int matchCursor: -1
     property var pickedFlags: null
-    property var highlights: ({})               // node index -> fill color
+    property var highlights: ({})               // node index -> fill colour
     property bool hlOpen: false
     property string _colorSig: ""
     property int selIndex: -1
@@ -137,7 +137,7 @@ Item {
 
     property var _colorDeps: [colorPattern, colorEnabled, colorColumn, metadata]
     on_ColorDepsChanged: {
-        // only announce when the user's coloring choice changed, not when metadata is re-aligned after an edit
+        // only announce when the user's colouring choice changed, not when metadata is re-aligned after an edit
         var sig = colorPattern + "|" + colorEnabled + "|" + colorColumn
         var announce = sig !== root._colorSig
         root._colorSig = sig
@@ -172,8 +172,8 @@ Item {
         var par = new Int32Array(n), len = new Float64Array(n)
         var label = new Array(n), children = new Array(n)
         var support = new Float64Array(n)
+        var supText = new Array(n).fill("")
         var hasLen = false
-        var numRe = /^-?\d+(\.\d+)?([eE][-+]?\d+)?$/
         for (var i = 0; i < n; i++) children[i] = []
         for (var j = 0; j < n; j++) {
             par[j] = parents[j]
@@ -192,15 +192,15 @@ Item {
                 tips[a] = 1
                 tipList.push(a)
                 if (label[a].length > longest.length) longest = label[a]
-            } else if (a > 0 && numRe.test(label[a])) {
-                support[a] = parseFloat(label[a])
-                label[a] = ""
+            } else if (a > 0) {
+                var sp = supportOf(label[a])
+                if (sp) { support[a] = sp.value; supText[a] = sp.text; label[a] = "" }
             }
             if (par[a] >= 0) { size[par[a]] += size[a]; tips[par[a]] += tips[a] }
         }
         tipList.reverse()
         root.pT = { n: n, par: par, len: len, names: label, children: children, size: size,
-                    tips: tips, support: support, hasLengths: hasLen, longest: longest, tipList: tipList }
+                    tips: tips, support: support, supText: supText, hasLengths: hasLen, longest: longest, tipList: tipList }
         root.totalTips = tips[0]
         root.firstRenderPending = true
         root.layoutDirty = true
@@ -242,7 +242,7 @@ Item {
         focusNode(m[root.matchCursor])
     }
 
-    // --------------------------------------------------------- color by regex
+    // --------------------------------------------------------- colour by regex
     function columnIndex(name) {
         if (!name || !root.metadata || !root.metadata.columns) return -1
         return root.metadata.columns.indexOf(name)
@@ -399,15 +399,35 @@ Item {
         canvas.requestPaint()
     }
 
-    // ---- manual color groups (box-select or search, then color).  They are layered on top of the
-    // regex / metadata categories by appending extra categories, so the legend, branch coloring and
+    // ---- manual colour groups (box-select or search, then colour).  They are layered on top of the
+    // regex / metadata categories by appending extra categories, so the legend, branch colouring and
     // every export format pick them up with no extra drawing code.
-    function textOn(hex) {                       // readable text color (white or near-black) on a filled band
+    // Support value carried by an internal-node label: a plain number ("95", "0.98") or a compound one as
+    // written by IQ-TREE ("87.5/99", "0.95/87").  Returns { value, text } or null for any other label.
+    function supportOf(label) {
+        var s = String(label).replace(/\s+/g, "")
+        if (s === "") return null
+        var num = "-?\\d+(\\.\\d+)?([eE][-+]?\\d+)?"
+        if (new RegExp("^" + num + "$").test(s)) {
+            var v = parseFloat(s)
+            return { value: v, text: String(Math.round(v * 100) / 100) }
+        }
+        if (new RegExp("^" + num + "([/|,]" + num + ")+$").test(s))
+            return { value: parseFloat(s.split(/[\/|,]/)[0]), text: s }
+        return null
+    }
+    // Text to draw for node i's support value ("" if it has none)
+    function supportLabel(t, i) {
+        if (t.supText) return t.supText[i] || ""
+        return t.support[i] === t.support[i] ? String(Math.round(t.support[i] * 100) / 100) : ""
+    }
+
+    function textOn(hex) {                       // readable text colour (white or near-black) on a filled band
         var m = /^#?([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})$/.exec(String(hex))
         if (!m) return "#1c2128"
         function lin(h) { var c = parseInt(h, 16) / 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4) }
         var lum = 0.2126 * lin(m[1]) + 0.7152 * lin(m[2]) + 0.0722 * lin(m[3])
-        // WCAG contrast of the fill against white vs against the dark text color (#1c2128, luminance ~0.015): take the better
+        // WCAG contrast of the fill against white vs against the dark text colour (#1c2128, luminance ~0.015): take the better
         return ((lum + 0.05) / 0.065 > 1.05 / (lum + 0.05)) ? "#1c2128" : "#ffffff"
     }
 
@@ -420,7 +440,7 @@ Item {
             for (var q0 = 0; q0 < groups[gi].names.length; q0++) g2["n:" + groups[gi].names[q0]] = gi
         var base = root.cat
         var labels = base ? base.labels.slice() : [], colors = base ? base.colors.slice() : []
-        var tipCat = new Int32Array(n).fill(-1)      // text/branch color category per tip
+        var tipCat = new Int32Array(n).fill(-1)      // text/branch colour category per tip
         var fillTip = new Int32Array(n).fill(-1)     // label-band category per tip (fill groups only)
         if (base) for (var k0 = 0; k0 < tl.length; k0++) tipCat[tl[k0]] = base.nodeCat[tl[k0]]
         var slot = [], used = 0
@@ -460,8 +480,8 @@ Item {
         root.manualCount = used
     }
 
-    // color the picked tips: text/branch color, or (fill = true) a filled band behind the label.
-    // color "" removes manual color from them.
+    // Colour the picked tips: text/branch colour, or (fill = true) a filled band behind the label.
+    // color "" removes manual colour from them.
     function colorPicked(color, name, fill) {
         if (!root.pT || root.pickedCount === 0) return
         var isFill = fill === true
@@ -484,8 +504,8 @@ Item {
         }
         root.manualGroups = groups
         recomputeCategories(false)
-        root.notify(color === "" ? "Removed color from " + nMoved + " tips"
-                                 : (isFill ? "Filled " : "colored ") + nMoved + (nMoved === 1 ? " tip " : " tips ") + (name || color))
+        root.notify(color === "" ? "Removed colour from " + nMoved + " tips"
+                                 : (isFill ? "Filled " : "Coloured ") + nMoved + (nMoved === 1 ? " tip " : " tips ") + (name || color))
         canvas.requestPaint()
     }
     function clearManualColors() {
@@ -1214,7 +1234,7 @@ Item {
             ctx.stroke()
         }
 
-        // ---- edges, batched per color
+        // ---- edges, batched per colour
         var buckets = {}, keys = []
         for (var k = 1; k < vis.length; k++) {
             var i = vis[k]
@@ -1236,7 +1256,7 @@ Item {
             ctx.stroke()
         }
 
-        // ---- LOD wedges (batched per color)
+        // ---- LOD wedges (batched per colour)
         if (lodList.length > 0) {
             var gb = {}, gk = []
             for (var gq = 0; gq < lodList.length; gq++) {
@@ -1356,10 +1376,12 @@ Item {
                 if (lod[ui]) continue
                 var x1 = PX[ui], y1 = PY[ui]
                 if (!inView(x1, y1, 30)) continue
-                if (root.showSupport && t.support[ui] === t.support[ui] && ch[ui].length > 0 && col[ui] !== true) {
-                    var st = String(Math.round(t.support[ui] * 100) / 100)
-                    ctx.textAlign = "right"; ctx.textBaseline = "bottom"
-                    ctx.fillText(st, x1 - 3, y1 - 2)
+                if (root.showSupport && ch[ui].length > 0 && col[ui] !== true) {
+                    var st = supportLabel(t, ui)
+                    if (st !== "") {
+                        ctx.textAlign = "right"; ctx.textBaseline = "bottom"
+                        ctx.fillText(st, x1 - 3, y1 - 2)
+                    }
                 }
                 if (root.showLengths && t.len[ui] > 0) {
                     var lt = String(parseFloat(t.len[ui].toPrecision(3)))
@@ -1459,7 +1481,7 @@ Item {
             }
         }
 
-        // filled label bands (manual "fill" coloring): drawn even where text is thinned out, so color regions stay visible
+        // filled label bands (manual "fill" colouring): drawn even where text is thinned out, so colour regions stay visible
         var fcat = cat && cat.fillCat ? cat.fillCat : null
         if (fcat && root.showTips) {
             var longestW = align ? ctx.measureText(t.longest || "").width : 0
@@ -1583,7 +1605,7 @@ Item {
     }
 
     // Builds a standalone SVG of the WHOLE tree (not the current viewport) at a
-    // readable row spacing, using the current layout / colors / display options.
+    // readable row spacing, using the current layout / colours / display options.
     // opts: { selection: bool (include search matches, picks, selected clade),
     //         rasterFonts: bool (single font family, for the SVG->PDF/PNG renderer) }
     function buildSvg(opts) {
@@ -1699,7 +1721,7 @@ Item {
             if (gd.length) out.push('<path d="' + gd.join("") + '" fill="none" stroke="#d7dce2" stroke-width="0.8"/>')
         }
 
-        // ---- edges, one path per color
+        // ---- edges, one path per colour
         var buckets = {}, keys = []
         for (var e = 1; e < vis.length; e++) {
             var ei = vis[e], c = colOf(ei)
@@ -1767,9 +1789,9 @@ Item {
             out.push('<g font-family="' + xmlEsc(famAttr) + '" font-size="' + nf(sfs) + '" fill="#6b7480">')
             for (var u = 1; u < vis.length; u++) {
                 var ui = vis[u], px1 = PX[ui], py1 = PY[ui], pp = par[ui]
-                if (root.showSupport && t.support[ui] === t.support[ui] && ch[ui].length > 0 && col[ui] !== true)
+                if (root.showSupport && ch[ui].length > 0 && col[ui] !== true && supportLabel(t, ui) !== "")
                     out.push('<text x="' + nf(px1 - 3) + '" y="' + nf(py1 - 2 - sfs * 0.2) + '" text-anchor="end">'
-                             + String(Math.round(t.support[ui] * 100) / 100) + '</text>')
+                             + xmlEsc(supportLabel(t, ui)) + '</text>')
                 if (root.showLengths && t.len[ui] > 0) {
                     var lt = String(parseFloat(t.len[ui].toPrecision(3))), mxx, myy, segPx
                     if (kind === "circular") {
@@ -2150,7 +2172,7 @@ Item {
                tip: "Zoom to box — drag a rectangle (or hold Shift and drag)"
                onClicked: { root.zoomTool = !root.zoomTool; if (root.zoomTool) root.selectTool = false } }
         Chip { width: 32; implicitWidth: 32; label: "▣"; fontPx: 15; on: root.selectTool
-               tip: "Select tips by box — drag a rectangle, then color or copy them (or hold Ctrl/Cmd and drag)"
+               tip: "Select tips by box — drag a rectangle, then colour or copy them (or hold Ctrl/Cmd and drag)"
                onClicked: { root.selectTool = !root.selectTool; if (root.selectTool) root.zoomTool = false } }
         Chip { width: 32; implicitWidth: 32; label: "≡"; fontPx: 17
                tip: "Readable rows — spread tips so every label is legible"
@@ -2177,8 +2199,8 @@ Item {
                label: "Compress long branch"; fontPx: 12
                tip: "Shorten the very long branch so the rest of the tree gets the full width"
                onClicked: root.breakToggled(true) }
-        Chip { visible: root.manualCount > 0; label: "Clear colors  (" + root.manualCount + " tips)"; fontPx: 12
-               tip: "Remove the colors you applied by hand"; onClicked: root.clearManualColors() }
+        Chip { visible: root.manualCount > 0; label: "Clear colours  (" + root.manualCount + " tips)"; fontPx: 12
+               tip: "Remove the colours you applied by hand"; onClicked: root.clearManualColors() }
         Chip { visible: root.highlightCount > 0; label: "Clear highlights  (" + root.highlightCount + ")"; fontPx: 12
                onClicked: root.clearHighlights() }
     }
@@ -2215,8 +2237,8 @@ Item {
                 Layout.fillWidth: true
                 spacing: 6
                 visible: !root.hlOpen && !root.colOpen
-                Chip { visible: root.pickedCount > 0; label: "color…"; fontPx: 12; on: root.manualCount > 0
-                       tip: "color the picked tips"; onClicked: root.colOpen = true }
+                Chip { visible: root.pickedCount > 0; label: "Colour…"; fontPx: 12; on: root.manualCount > 0
+                       tip: "Colour the picked tips"; onClicked: root.colOpen = true }
                 Chip { visible: root.selIsInternal && root.pickedCount === 0
                        label: root.selIsCollapsed ? "Expand" : "Collapse"; fontPx: 12; onClicked: root.toggleSelected() }
                 Chip { visible: root.selIndex >= 0 && root.pickedCount === 0
@@ -2261,9 +2283,9 @@ Item {
                     }
                 }
                 Chip { label: "Fill label background"; fontPx: 12; on: root.fillLabels
-                       tip: "On: fill a band behind each picked label (like a poster figure). Off: color the text and branches."
+                       tip: "On: fill a band behind each picked label (like a poster figure). Off: colour the text and branches."
                        onClicked: root.fillLabels = !root.fillLabels }
-                Chip { label: "Uncolor"; fontPx: 12; tip: "Remove manual color from the picked tips"
+                Chip { label: "Uncolour"; fontPx: 12; tip: "Remove manual colour from the picked tips"
                        onClicked: { root.colorPicked("", ""); root.colOpen = false } }
                 Chip { label: "Cancel"; fontPx: 12; onClicked: root.colOpen = false }
             }

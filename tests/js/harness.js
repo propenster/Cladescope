@@ -30,7 +30,7 @@ function grab(name) {
 const NAMES = ['computeLayout', 'breakGeom', 'hlShape', 'fillShape', 'nf', 'shapePath', 'xmlEsc', 'buildSvg',
   'columnIndex', 'isPolar', 'labelAnchor', 'refreshSelection', 'clearPicked', 'ensurePicked', 'pickClade',
   'baseCategories', 'recomputeCategories', 'applyManualColors', 'colorPicked', 'clearManualColors',
-  'tipsInRect', 'boxSelect', 'textOn'];
+  'tipsInRect', 'boxSelect', 'textOn', 'supportOf', 'supportLabel'];
 const code = NAMES.map(grab).join('\n\n');
 
 // Iterative Newick parser -> flat pre-order node list (no recursion: safe for ladder trees).
@@ -52,8 +52,7 @@ function parseNewick(s) {
     let label = '';
     if (c === "'") { i++; while (i < s.length && s[i] !== "'") label += s[i++]; i++; }
     else { const j0 = i; while (i < s.length && !isDelim(s[i])) i++; label = s.slice(j0, i).trim(); }
-    if (nodes[cur].kids.length && label !== '' && !isNaN(parseFloat(label))) nodes[cur].support = parseFloat(label);
-    else nodes[cur].name = label;
+    nodes[cur].name = label;      // support labels are recognised later by the canvas's own supportOf()
   }
   return nodes;
 }
@@ -89,6 +88,15 @@ function run(pT, over, opts) {
   const Qt = { hsla: (h) => ({ toString: () => 'hsl(' + Math.round(h * 360) + ',68%,46%)' }) };
   const exportsList = NAMES.join(', ');
   const f = new Function('root', 'tm', 'canvas', 'Qt', code + '\nreturn { ' + exportsList + ' };')(root, tm, canvas, Qt);
+  // mirror prepareTree: internal labels that are support values leave the name and become support/supText
+  if (!pT.supText) {
+    pT.supText = new Array(pT.n).fill('');
+    for (let i = 1; i < pT.n; i++) {
+      if (!pT.children[i].length) continue;
+      const sp = f.supportOf(pT.names[i]);
+      if (sp) { pT.support[i] = sp.value; pT.supText[i] = sp.text; pT.names[i] = ''; }
+    }
+  }
   const svg = f.buildSvg(opts);
   return { svg, root, f };
 }

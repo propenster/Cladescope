@@ -21,15 +21,61 @@ bool isDelimiter(QChar c)
 
 // ============================================================ Newick / Nexus
 
+// Support value stored in a BEAST / MrBayes style annotation, e.g.
+//   [&height=1.2,height_95%_HPD={0.9,1.5},posterior=0.98]   or   [&prob=0.99,prob_stddev=0.01]
+// `body` is the text after the "&". Returns the value as written (e.g. "0.98"), or an empty
+// string if the annotation carries no recognised support key. Commas inside {...} or "..."
+// do not split entries.
+QString annotationSupport(const QString &body)
+{
+    static const QStringList keys = {"posterior", "prob", "probability", "pp", "support",
+                                     "bootstrap", "bs", "prob(percent)"};
+    QHash<QString, QString> found;
+    QString cur;
+    int brace = 0;
+    bool quoted = false;
+    auto flush = [&]() {
+        const int eq = cur.indexOf('=');
+        if (eq > 0) {
+            QString k = cur.left(eq).trimmed().toLower();
+            QString v = cur.mid(eq + 1).trimmed();
+            if (k.size() >= 2 && k.startsWith('"') && k.endsWith('"')) k = k.mid(1, k.size() - 2);
+            if (v.size() >= 2 && v.startsWith('"') && v.endsWith('"')) v = v.mid(1, v.size() - 2);
+            if (!found.contains(k)) found.insert(k, v.trimmed());
+        }
+        cur.clear();
+    };
+    for (const QChar c : body) {
+        if (c == '"') quoted = !quoted;
+        else if (!quoted && c == '{') ++brace;
+        else if (!quoted && c == '}') brace = qMax(0, brace - 1);
+        if (c == ',' && !quoted && brace == 0) { flush(); continue; }
+        cur += c;
+    }
+    flush();
+    for (const QString &k : keys) {
+        auto it = found.constFind(k);
+        if (it == found.constEnd()) continue;
+        bool ok = false;
+        it->toDouble(&ok);
+        if (ok) return *it;
+    }
+    return QString();
+}
+
 // Iterative Newick parser. Handles quoted labels, [comments], scientific
-// notation branch lengths and internal node labels (e.g. support values).
+// notation branch lengths and internal node labels (e.g. support values),
+// including BEAST/MrBayes [&posterior=...] annotations on internal nodes.
 ParsedTree parseNewick(const QString &text, const std::function<void(double)> &progress)
 {
     ParsedTree t;
-    auto addNode = [&t](int parent) -> int {
+    QVector<char> hasKid;   // node has at least one child (so a comment after it annotates an internal node)
+    auto addNode = [&t, &hasKid](int parent) -> int {
         t.names.append(QString());
         t.lengths.append(0.0);
         t.parents.append(parent);
+        hasKid.append(0);
+        if (parent >= 0) hasKid[parent] = 1;
         return t.names.size() - 1;
     };
 
@@ -50,11 +96,19 @@ ParsedTree parseNewick(const QString &text, const std::function<void(double)> &p
         if (c.isSpace()) { ++i; continue; }
 
         if (c == '[') { // comment, may be nested
+            const int cs = i;
             int depth = 0;
             while (i < n) {
                 const QChar d = text.at(i++);
                 if (d == '[') ++depth;
                 else if (d == ']' && --depth == 0) break;
+            }
+            // A BEAST/MrBayes annotation on an internal node, e.g. ")[&posterior=0.98]:0.5",
+            // becomes that node's support value unless the node already has a label.
+            if (cs + 1 < n && text.at(cs + 1) == '&' && cur != 0 && hasKid[cur] && t.names[cur].isEmpty()
+                && i - cs >= 3 && text.at(i - 1) == ']') {
+                const QString v = annotationSupport(text.mid(cs + 2, i - cs - 3));
+                if (!v.isEmpty()) t.names[cur] = v;
             }
             continue;
         }
@@ -263,7 +317,7 @@ QString demoClade(QRandomGenerator &rng, int tips, int region, int &counter)
     auto len = [&rng]() { return QString::number(0.01 + rng.generateDouble() * 0.09, 'f', 4); };
     if (tips == 1) {
         return QString("Sample%1_%2_%3:%4")
-            .arg(++counter)
+        .arg(++counter)
             .arg(regions[region])
             .arg(2015 + int(rng.bounded(9)))
             .arg(len());
