@@ -169,6 +169,7 @@ Rectangle {
             SectionHeader { text: "Layout"; Layout.topMargin: 0 }
             ComboBox {
                 Layout.fillWidth: true
+                Layout.preferredHeight: 35
                 font.family: root.settings ? root.settings.appFont : "sans-serif"
                 font.pixelSize: 13
                 model: ["Rectangular", "Slanted", "Circular", "Radial (unrooted)"]
@@ -201,6 +202,7 @@ Rectangle {
                     implicitWidth: 150
                     font.family: root.settings ? root.settings.appFont : "sans-serif"
                     font.pixelSize: 12
+                    Layout.preferredHeight: 35
                     model: ["Original", "Ladderize ▲", "Ladderize ▼"]
                     currentIndex: root.settings ? Math.max(0, root.ladderKeys.indexOf(root.settings.ladderize)) : 0
                     onActivated: (i) => root.settings.ladderize = root.ladderKeys[i]
@@ -340,6 +342,7 @@ Rectangle {
                 ComboBox {
                     id: sourceCombo
                     implicitWidth: 170
+                    Layout.preferredHeight: 35
                     font.family: root.settings ? root.settings.appFont : "sans-serif"
                     font.pixelSize: 12
                     model: root.settings ? ["Tip names"].concat(root.settings.metaColumns) : ["Tip names"]
@@ -410,6 +413,7 @@ Rectangle {
 
                 ComboBox {
                     id: delimCombo
+                    Layout.preferredHeight: 35
                     Layout.preferredWidth: 65
                     font.pixelSize: 12
                     model: ["/", "|", "_", "-"]
@@ -418,6 +422,7 @@ Rectangle {
                 SpinBox {
                     id: indexSpinBox
                     Layout.preferredWidth: 80
+                    Layout.preferredHeight: 35
                     from: 0; to: 20; value: 2
                 }
 
