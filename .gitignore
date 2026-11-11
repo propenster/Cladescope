@@ -37,3 +37,4 @@ private/
 *.private.*
 .DS_Store
 Thumbs.db
+docs/gif
