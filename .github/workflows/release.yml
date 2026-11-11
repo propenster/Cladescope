@@ -1,23 +1,111 @@
-name: C/C++ CI
-
+name: Release
 on:
   push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+    tags: ['v*']
+
+permissions:
+  contents: write
 
 jobs:
-  build:
-
-    runs-on: ubuntu-latest
-
+  package:
+    name: package (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-latest]
     steps:
-    - uses: actions/checkout@v4
-    - name: configure
-      run: ./configure
-    - name: make
-      run: make
-    - name: make check
-      run: make check
-    - name: make distcheck
-      run: make distcheck
+      - uses: actions/checkout@v4
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: 6.10.*
+          cache: true
+      - name: Linux system libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-dev libxkbcommon-x11-0 libxcb-cursor0 libegl1 \
+            libfuse2 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-xinerama0
+      - name: Build
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=install
+          cmake --build build --config Release --parallel
+      - name: Version
+        id: v
+        shell: bash
+        run: echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem build -Recurse -Filter cladescope.exe | Select-Object -First 1
+          if (-not $exe) { $exe = Get-ChildItem build -Recurse -Filter *.exe | Where-Object { $_.Name -notlike 'tst_*' } | Select-Object -First 1 }
+          New-Item -ItemType Directory -Force dist/Cladescope | Out-Null
+          Copy-Item $exe.FullName dist/Cladescope/
+          windeployqt --release --qmldir . "dist/Cladescope/$($exe.Name)"
+          Compress-Archive -Path dist/Cladescope -DestinationPath "Cladescope-${{ steps.v.outputs.tag }}-windows-x64.zip"
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          APP=$(find build -name "*.app" -maxdepth 3 | head -n1)
+          macdeployqt "$APP" -qmldir=. -dmg
+          DMG=$(find build -name "*.dmg" | head -n1)
+          cp "$DMG" "Cladescope-${{ steps.v.outputs.tag }}-macos-arm64.dmg"
+
+      - name: Package (Linux AppImage)
+        if: runner.os == 'Linux'
+        run: |
+          cmake --install build
+          BIN=$(find install -type f -perm -u+x -name 'Cladescope' -o -type f -perm -u+x -name 'cladescope' | head -n1)
+          mkdir -p AppDir/usr/bin AppDir/usr/share/applications
+          cp "$BIN" AppDir/usr/bin/cladescope
+          cat > AppDir/usr/share/applications/cladescope.desktop << 'DESK'
+          [Desktop Entry]
+          Type=Application
+          Name=Cladescope
+          Exec=cladescope
+          Icon=cladescope
+          Categories=Education;Science;Biology;
+          DESK
+          sed -i 's/^          //' AppDir/usr/share/applications/cladescope.desktop
+          ICON_DIR=AppDir/usr/share/icons/hicolor/256x256/apps
+          mkdir -p "$ICON_DIR"
+          cp ui/assets/icons/cladescope-C-256.png "$ICON_DIR/cladescope.png"
+          curl -fsSL -o linuxdeploy https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          curl -fsSL -o linuxdeploy-qt https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          chmod +x linuxdeploy linuxdeploy-qt
+          export QML_SOURCES_PATHS="$PWD"
+          ./linuxdeploy --appimage-extract-and-run --appdir AppDir \
+            --desktop-file AppDir/usr/share/applications/cladescope.desktop \
+            --icon-file "$ICON_DIR/cladescope.png" \
+            --executable AppDir/usr/bin/cladescope --plugin qt --output appimage
+          mv Cladescope*.AppImage "Cladescope-${{ steps.v.outputs.tag }}-linux-x86_64.AppImage" 2>/dev/null \
+            || mv *.AppImage "Cladescope-${{ steps.v.outputs.tag }}-linux-x86_64.AppImage"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ runner.os }}
+          path: |
+            Cladescope-*.zip
+            Cladescope-*.dmg
+            Cladescope-*.AppImage
+
+  publish:
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Checksums
+        working-directory: assets
+        run: sha256sum Cladescope-* > SHA256SUMS.txt
+      - name: Draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          files: assets/*
