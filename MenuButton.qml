@@ -26,8 +26,9 @@ Button {
             sourceSize.width: 22; sourceSize.height: 22
             Layout.preferredWidth: root.iconSource !== "" ? 22 : 0
             Layout.preferredHeight: 22
-            layer.enabled: true
-            layer.effect: MultiEffect { colorization: 1.0; colorizationColor: "#212121" }
+            // layer.enabled: true
+            // layer.effect: MultiEffect { colorization: 1.0; colorizationColor: "#212121" }
+            opacity: root.enabled ? 1.0 : 0.4
         }
         Text {
             text: root.labelText

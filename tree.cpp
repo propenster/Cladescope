@@ -310,7 +310,7 @@ QString treeToNewick(const ParsedTree &t, int start)
     return out;
 }
 
-// ---- demo tree (clade-correlated "regions" so pattern colouring looks good)
+// ---- demo tree (clade-correlated "regions" so pattern coloring looks good)
 QString demoClade(QRandomGenerator &rng, int tips, int region, int &counter)
 {
     static const QStringList regions = {"Kenya", "Brazil", "India", "USA", "China", "UK", "Peru"};

@@ -9,5 +9,5 @@
 </g>
   <text x="380" y="190" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="104" font-weight="700" fill="#f2f7f5">Clade<tspan fill="#8fe3a8">scope</tspan></text>
   <text x="384" y="248" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="28" fill="#b7d3cd">Fast, cross-platform viewer for phylogenetic trees of any size</text>
-  <text x="384" y="300" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="22" fill="#7fa9a3">Newick · NEXUS · metadata colouring · rerooting · SVG / PDF / PNG export</text>
+  <text x="384" y="300" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="22" fill="#7fa9a3">Newick · NEXUS · metadata coloring · rerooting · SVG / PDF / PNG export</text>
 </svg>

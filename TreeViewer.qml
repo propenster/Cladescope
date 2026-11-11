@@ -63,22 +63,32 @@ Item {
 
     // ------------------------------------------------------------------ fonts
     // UI font (also the default tree font)
-    FontLoader { id: fontLight; source: "qrc:/ui/assets/fonts/RobotoCondensed-Light.ttf" }
+    FontLoader { id: fontLight; source: "qrc:/ui/assets/fonts/RobotoCondensed-Regular.ttf" }
     FontLoader { id: fontBold; source: "qrc:/ui/assets/fonts/RobotoCondensed-Bold.ttf" }
 
     // Optional tree fonts. Drop the .ttf files into ui/assets/fonts, add them to
     // your .qrc / CMake resource list, and edit this catalog. Fonts whose file is
     // missing are simply left out of the picker.
     readonly property var fontCatalog: [
-        { label: "Inter",              file: "qrc:/ui/assets/fonts/Inter-Regular.ttf" },
-        { label: "IBM Plex Sans",      file: "qrc:/ui/assets/fonts/IBMPlexSans-Regular.ttf" },
+        // { label: "Inter",              file: "qrc:/ui/assets/fonts/Inter-Regular.ttf" },
+        // { label: "IBM Plex Sans",      file: "qrc:/ui/assets/fonts/IBMPlexSans-Regular.ttf" },
         { label: "IBM Plex Mono",      file: "qrc:/ui/assets/fonts/IBMPlexMono-Regular.ttf" },
         { label: "Source Sans 3",      file: "qrc:/ui/assets/fonts/SourceSans3-Regular.ttf" },
         { label: "Fira Sans Condensed",file: "qrc:/ui/assets/fonts/FiraSansCondensed-Regular.ttf" },
         { label: "JetBrains Mono",     file: "qrc:/ui/assets/fonts/JetBrainsMono-Regular.ttf" },
         { label: "Lato",               file: "qrc:/ui/assets/fonts/Lato-Regular.ttf" },
         { label: "Noto Sans",          file: "qrc:/ui/assets/fonts/NotoSans-Regular.ttf" },
-        { label: "Merriweather",       file: "qrc:/ui/assets/fonts/Merriweather-Regular.ttf" }
+        // { label: "Merriweather",       file: "qrc:/ui/assets/fonts/Merriweather-Regular.ttf" },
+
+        { label: "Arimo",               file: "qrc:/ui/assets/fonts/Arimo-Regular.ttf" },
+        { label: "Tinos",               file: "qrc:/ui/assets/fonts/Tinos-Regular.ttf" },
+        { label: "Source Serif 4",      file: "qrc:/ui/assets/fonts/SourceSerif4-Regular.ttf" },
+        { label: "Fira Sans Regular",   file: "qrc:/ui/assets/fonts/FiraSans-Regular.ttf" },
+        { label: "Caveat",              file: "qrc:/ui/assets/fonts/Caveat-Regular.ttf" },
+        { label: "Poppins",             file: "qrc:/ui/assets/fonts/Poppins-Regular.ttf" },
+        { label: "Montserrat",          file: "qrc:/ui/assets/fonts/Montserrat-Regular.ttf" },
+
+
     ]
 
     function rebuildFonts() {

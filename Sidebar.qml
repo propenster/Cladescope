@@ -28,16 +28,14 @@ Rectangle {
     }
 
     // Helper to build a field-extraction regex automatically for non-regex users
-    function applyFieldExtraction(delimiter, index) {
-        // Escaping special regex characters in delimiter if needed
-        let escapedDelim = delimiter.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        // Formula: skip N delimiter-separated blocks, then capture the target block
-        let pattern = index === 0
-            ? "^([^" + escapedDelim + "]+)"
-            : "^(?:[^" + escapedDelim + "]+" + escapedDelim + "){" + index + "}([^" + escapedDelim + "]+)";
-
-        regexField.text = pattern;
-        root.applyColors();
+    // Build a regex that captures the Nth field (1-based) when names are split by `delimiter`
+    function applyFieldExtraction(delimiter, fieldNumber) {
+        var d = delimiter.replace(/[.*+?^${}()|[\]\\\-]/g, '\\$&')
+        var idx = Math.max(0, fieldNumber - 1)
+        regexField.text = idx === 0
+            ? "^([^" + d + "]+)"
+            : "^(?:[^" + d + "]+" + d + "){" + idx + "}([^" + d + "]+)"
+        root.applyColors()
     }
 
     // ---------------------------------------------------------- small widgets
@@ -406,33 +404,46 @@ Rectangle {
             }
 
             // Non-Regex Field Picker Helper Row
+            // Field picker: split names by a delimiter and color by the Nth piece
             RowLayout {
                 Layout.fillWidth: true
-                spacing: 6
                 Layout.topMargin: 4
-
+                Caption { text: "Split names by"; Layout.fillWidth: true }
                 ComboBox {
                     id: delimCombo
+                    implicitWidth: 150
                     Layout.preferredHeight: 35
-                    Layout.preferredWidth: 65
+                    font.family: root.settings ? root.settings.appFont : "sans-serif"
                     font.pixelSize: 12
-                    model: ["/", "|", "_", "-"]
+                    textRole: "t"
+                    valueRole: "v"
+                    model: [
+                        { t: "underscore  _", v: "_" },
+                        { t: "pipe  |",       v: "|" },
+                        { t: "slash  /",      v: "/" },
+                        { t: "dash  -",       v: "-" },
+                        { t: "dot  .",        v: "." },
+                        { t: "space",         v: " " }
+                    ]
                 }
+            }
 
+            RowLayout {
+                Layout.fillWidth: true
+                Caption { text: "Field number"; Layout.fillWidth: true }
                 SpinBox {
                     id: indexSpinBox
-                    Layout.preferredWidth: 80
+                    implicitWidth: 150
                     Layout.preferredHeight: 35
-                    from: 0; to: 20; value: 2
+                    from: 1; to: 20; value: 2
+                    editable: true
                 }
+            }
 
-                SoftButton {
-                    text: "Pick Field"
-                    Layout.fillWidth: true
-                    onClicked: {
-                        root.applyFieldExtraction(delimCombo.displayText, indexSpinBox.value)
-                    }
-                }
+            SoftButton {
+                text: "Color by this field"
+                Layout.fillWidth: true
+                onClicked: root.applyFieldExtraction(delimCombo.currentValue, indexSpinBox.value)
             }
 
             RowLayout {
