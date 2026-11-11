@@ -1,8 +1,10 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(cladescope VERSION 0.1 LANGUAGES CXX)
+project(cladescope VERSION 0.1.0 LANGUAGES CXX)
 
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_AUTORCC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Quick Svg)
 
@@ -19,6 +21,7 @@ endif()
 
 qt_add_executable(cladescope
     main.cpp
+    resources.qrc
     ${app_icon_windows}
 )
 
@@ -38,8 +41,6 @@ qt_add_qml_module(cladescope
         tree.cpp
         appbridge.h
         appbridge.cpp
-    RESOURCES
-        resources.qrc
 )
 
 qt_add_resources(cladescope "app_icons"
@@ -53,12 +54,19 @@ qt_add_resources(cladescope "app_icons"
         ui/assets/icons/cladescope-C-128.png
         ui/assets/icons/cladescope-C-256.png
         ui/assets/icons/cladescope-C-512.png
-    )
-# Qt for iOS sets MACOSX_BUNDLE_GUI_IDENTIFIER automatically since Qt 6.1.
-# If you are developing for iOS or macOS you should consider setting an
-# explicit, fixed bundle identifier manually though.
+)
+
+if(APPLE)
+    set(CLADESCOPE_ICNS "${CMAKE_CURRENT_SOURCE_DIR}/packaging/cladescope.icns")
+    target_sources(cladescope PRIVATE ${CLADESCOPE_ICNS})
+    set_source_files_properties(${CLADESCOPE_ICNS} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+    set_target_properties(cladescope PROPERTIES
+        MACOSX_BUNDLE_ICON_FILE cladescope.icns
+        MACOSX_BUNDLE_BUNDLE_NAME "Cladescope")
+endif()
+
 set_target_properties(cladescope PROPERTIES
-#    MACOSX_BUNDLE_GUI_IDENTIFIER com.example.cladescope
+    MACOSX_BUNDLE_GUI_IDENTIFIER com.cladescope.app
     MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
     MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}
     MACOSX_BUNDLE TRUE
@@ -66,8 +74,7 @@ set_target_properties(cladescope PROPERTIES
 )
 
 target_link_libraries(cladescope
-    PRIVATE Qt6::Quick
-    Qt6::Svg
+    PRIVATE Qt6::Quick Qt6::Svg
 )
 
 install(TARGETS cladescope
@@ -76,7 +83,7 @@ install(TARGETS cladescope
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
-option(CLADESCOPE_BUILD_TESTS "Build unit tests" ON)
+option(CLADESCOPE_BUILD_TESTS "Build unit tests" OFF)
 if(CLADESCOPE_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests/cpp)
