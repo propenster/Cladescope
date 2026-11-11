@@ -72,6 +72,11 @@ set_target_properties(cladescope PROPERTIES
     MACOSX_BUNDLE TRUE
     WIN32_EXECUTABLE TRUE
 )
+# On Linux the QML module directory build/cladescope would collide with the executable
+if(UNIX AND NOT APPLE)
+    set_target_properties(cladescope PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+endif()
 
 target_link_libraries(cladescope
     PRIVATE Qt6::Quick Qt6::Svg
