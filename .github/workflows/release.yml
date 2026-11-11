@@ -50,9 +50,15 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           APP=$(find build -name "*.app" -maxdepth 3 | head -n1)
-          macdeployqt "$APP" -qmldir=. -dmg
-          DMG=$(find build -name "*.dmg" | head -n1)
-          cp "$DMG" "Cladescope-${{ steps.v.outputs.tag }}-macos-arm64.dmg"
+          macdeployqt "$APP" -qmldir=.
+          # Ad-hoc sign (no Apple account needed). Unsigned/invalid bundles show as "damaged" on Apple Silicon.
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --deep --strict "$APP"
+          mkdir dmgroot
+          cp -R "$APP" dmgroot/
+          ln -s /Applications dmgroot/Applications
+          hdiutil create -volname "Cladescope" -srcfolder dmgroot -ov -format UDZO \
+            "Cladescope-${{ steps.v.outputs.tag }}-macos-arm64.dmg"
 
       - name: Package (Linux AppImage)
         if: runner.os == 'Linux'
