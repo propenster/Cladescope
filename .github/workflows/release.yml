@@ -73,16 +73,19 @@ jobs:
           ICON_DIR=AppDir/usr/share/icons/hicolor/256x256/apps
           mkdir -p "$ICON_DIR"
           cp ui/assets/icons/cladescope-C-256.png "$ICON_DIR/cladescope.png"
-          curl -fsSL -o linuxdeploy https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-          curl -fsSL -o linuxdeploy-qt https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
-          chmod +x linuxdeploy linuxdeploy-qt
+          # The Qt plugin must sit next to linuxdeploy and keep its "linuxdeploy-plugin-qt" name
+          curl -fsSL -o linuxdeploy-x86_64.AppImage https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          curl -fsSL -o linuxdeploy-plugin-qt-x86_64.AppImage https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-qt-x86_64.AppImage
+          export APPIMAGE_EXTRACT_AND_RUN=1
           export QML_SOURCES_PATHS="$PWD"
-          ./linuxdeploy --appimage-extract-and-run --appdir AppDir \
+          export QMAKE="$QT_ROOT_DIR/bin/qmake"
+          export OUTPUT="Cladescope-${{ steps.v.outputs.tag }}-linux-x86_64.AppImage"
+          ./linuxdeploy-x86_64.AppImage --appdir AppDir \
             --desktop-file AppDir/usr/share/applications/cladescope.desktop \
             --icon-file "$ICON_DIR/cladescope.png" \
             --executable AppDir/usr/bin/cladescope --plugin qt --output appimage
-          mv Cladescope*.AppImage "Cladescope-${{ steps.v.outputs.tag }}-linux-x86_64.AppImage" 2>/dev/null \
-            || mv *.AppImage "Cladescope-${{ steps.v.outputs.tag }}-linux-x86_64.AppImage"
+          ls -l *.AppImage
 
       - uses: actions/upload-artifact@v4
         with:
