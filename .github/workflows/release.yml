@@ -52,11 +52,13 @@ jobs:
           APP=$(find build -name "*.app" -maxdepth 3 | head -n1)
           macdeployqt "$APP" -qmldir=.
           # Ad-hoc sign (no Apple account needed). Unsigned/invalid bundles show as "damaged" on Apple Silicon.
+          rm -rf "$APP/Contents/PlugIns/sqldrivers"   # unused SQL drivers pull in missing database libraries
           codesign --force --deep --sign - "$APP"
           codesign --verify --deep --strict --verbose=2 "$APP"
           codesign -dv --verbose=4 "$APP" 2>&1 | tee sign.txt
           grep -q "Sealed Resources version" sign.txt || { echo "App bundle is not sealed"; exit 1; }
-          grep -q "Info.plist=bound" sign.txt || { echo "Info.plist is not bound"; exit 1; }
+          grep -q "Info.plist entries=" sign.txt || { echo "Info.plist is not bound"; exit 1; }
+          if grep -q "Info.plist=not bound" sign.txt; then echo "Info.plist is not bound"; exit 1; fi
           mkdir dmgroot
           cp -R "$APP" dmgroot/
           ln -s /Applications dmgroot/Applications
