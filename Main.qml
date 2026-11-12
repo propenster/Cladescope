@@ -14,6 +14,23 @@ ApplicationWindow {
     visible: true
     title: "Cladescope" + (treeModel.fileName !== "" ? " — " + treeModel.fileName : "")
     color: "#f6f7f9"
+    palette {
+        window: "#ffffff"
+        windowText: "#1c2128"
+        base: "#ffffff"
+        alternateBase: "#f6f7f9"
+        text: "#1c2128"
+        button: "#eef1f5"
+        buttonText: "#1c2128"
+        highlight: "#2f6fed"
+        highlightedText: "#ffffff"
+        mid: "#d9dde3"
+        dark: "#b9c0c9"
+        light: "#ffffff"
+        placeholderText: "#6b7480"
+        toolTipBase: "#1c2128"
+        toolTipText: "#ffffff"
+    }
 
     readonly property bool hasTree: treeModel.fileName !== ""
     readonly property var vs: viewer.settings
