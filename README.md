@@ -58,7 +58,7 @@ Requirements: Qt 6.10 or newer (Quick and Svg modules), CMake 3.16+, a C++17 com
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
-./build/bin/cladescope         # on Windows: build\Release\cladescope.exe
+./build/bin/Cladescope         # on Windows: build\Release\cladescope.exe
 ```
 
 ## Usage
