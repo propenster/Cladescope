@@ -45,6 +45,10 @@ Download the package for your system from the [Releases page](../../releases):
 | macOS | `Cladescope-<version>-macos.dmg` | Not code-signed: right-click the app and choose Open the first time. |
 | Linux | `Cladescope-<version>-linux-x86_64.AppImage` | `chmod +x` it and run. |
 
+**macOS:** Cladescope isn't notarized yet. After dragging it to Applications, run
+`xattr -dr com.apple.quarantine /Applications/Cladescope.app` once, or open
+System Settings → Privacy & Security and click **Open Anyway**.
+
 Verify downloads with `SHA256SUMS.txt` from the same release.
 
 ## Build from source
@@ -54,7 +58,7 @@ Requirements: Qt 6.10 or newer (Quick and Svg modules), CMake 3.16+, a C++17 com
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
-./build/cladescope        # on Windows: build\Release\cladescope.exe
+./build/bin/cladescope         # on Windows: build\Release\cladescope.exe
 ```
 
 ## Usage

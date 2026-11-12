@@ -53,7 +53,10 @@ jobs:
           macdeployqt "$APP" -qmldir=.
           # Ad-hoc sign (no Apple account needed). Unsigned/invalid bundles show as "damaged" on Apple Silicon.
           codesign --force --deep --sign - "$APP"
-          codesign --verify --deep --strict "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -dv --verbose=4 "$APP" 2>&1 | tee sign.txt
+          grep -q "Sealed Resources version" sign.txt || { echo "App bundle is not sealed"; exit 1; }
+          grep -q "Info.plist=bound" sign.txt || { echo "Info.plist is not bound"; exit 1; }
           mkdir dmgroot
           cp -R "$APP" dmgroot/
           ln -s /Applications dmgroot/Applications
