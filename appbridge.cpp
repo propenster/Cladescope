@@ -19,6 +19,7 @@
 #include <QSettings>
 #include <QSvgRenderer>
 #include <QTextStream>
+#include <QFileInfo>
 
 namespace {
 QString apiName(QSGRendererInterface::GraphicsApi a)
@@ -32,6 +33,15 @@ QString apiName(QSGRendererInterface::GraphicsApi a)
     default:                                return QStringLiteral("Unknown");
     }
 }
+
+constexpr int kMaxRecent = 10;
+#ifdef Q_OS_WIN
+constexpr Qt::CaseSensitivity kPathCase = Qt::CaseInsensitive;
+#else
+constexpr Qt::CaseSensitivity kPathCase = Qt::CaseSensitive;
+#endif
+QString cleanAbs(const QString &p) { return QDir::cleanPath(QFileInfo(p).absoluteFilePath()); }
+
 } // namespace
 
 AppBridge::AppBridge(const QString &startupFile, QObject *parent)
@@ -174,5 +184,59 @@ bool AppBridge::openNewWindow(const QString &newick, const QString &name)
     const QString path = QDir::temp().filePath(
         QString("cladescope_%1_%2.nwk").arg(name).arg(QDateTime::currentMSecsSinceEpoch()));
     if (!saveText(path, newick + "\n")) return false;
+    return QProcess::startDetached(QCoreApplication::applicationFilePath(), QStringList() << path);
+}
+
+QStringList AppBridge::recentFiles() const
+{
+    QSettings s("Cladescope", "Cladescope");
+    QStringList out;
+    const QStringList stored = s.value("recent/files").toStringList();
+    for (const QString &p : stored) out << QDir::toNativeSeparators(p);
+    return out;
+}
+
+void AppBridge::addRecent(const QString &path)
+{
+    const QString abs = cleanAbs(path);
+    if (abs.isEmpty()) return;
+    // clades sent to a new window live in the temp folder; keep them out of the list
+    if (QFileInfo(abs).fileName().startsWith("cladescope_")
+        && abs.startsWith(QDir::cleanPath(QDir::tempPath()), kPathCase)) return;
+    QSettings s("Cladescope", "Cladescope");
+    QStringList list = s.value("recent/files").toStringList();
+    for (int i = list.size() - 1; i >= 0; --i)
+        if (QString::compare(list.at(i), abs, kPathCase) == 0) list.removeAt(i);
+    list.prepend(abs);
+    while (list.size() > kMaxRecent) list.removeLast();
+    s.setValue("recent/files", list);
+    emit recentChanged();
+}
+
+void AppBridge::removeRecent(const QString &path)
+{
+    const QString abs = cleanAbs(path);
+    QSettings s("Cladescope", "Cladescope");
+    QStringList list = s.value("recent/files").toStringList();
+    for (int i = list.size() - 1; i >= 0; --i)
+        if (QString::compare(list.at(i), abs, kPathCase) == 0) list.removeAt(i);
+    s.setValue("recent/files", list);
+    emit recentChanged();
+}
+
+void AppBridge::clearRecent()
+{
+    QSettings s("Cladescope", "Cladescope");
+    s.remove("recent/files");
+    emit recentChanged();
+}
+
+bool AppBridge::fileExists(const QString &path) const
+{
+    return QFileInfo(path).isFile();
+}
+
+bool AppBridge::openFileInNewWindow(const QString &path)
+{
     return QProcess::startDetached(QCoreApplication::applicationFilePath(), QStringList() << path);
 }

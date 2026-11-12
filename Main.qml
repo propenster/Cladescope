@@ -39,7 +39,7 @@ ApplicationWindow {
     property string exportFmt: "svg"
 
     Component.onCompleted: {
-        if (appBridge.startupFile !== "") treeModel.loadPath(appBridge.startupFile)
+        if (appBridge.startupFile !== "") window.openTreePath(appBridge.startupFile)
     }
 
     function setLayout(type, lengths) {
@@ -47,6 +47,26 @@ ApplicationWindow {
         vs.useBranchLengths = lengths
     }
     function radio(on, text) { return (on ? "●  " : "○  ") + text }
+
+    property string pendingRecent: ""
+
+    // Open a tree: in this window if it's empty, otherwise in a new window
+    function openTreePath(path) {
+        if (path === "") return
+        if (!appBridge.fileExists(path)) {
+            appBridge.removeRecent(path)
+            toast.flash("File not found: " + path)
+            return
+        }
+        if (window.hasTree) {
+            if (appBridge.openFileInNewWindow(path)) toast.flash("Opening in a new window…")
+            else toast.flash("Could not open a new window")
+            return
+        }
+        window.pendingRecent = path
+        treeModel.loadPath(path)
+    }
+    function openTreeUrl(url) { window.openTreePath(treeModel.localPath(url)) }
 
     // ------------------------------------------------------------ C++ BACKEND
     TreeModel { id: treeModel }
@@ -58,8 +78,13 @@ ApplicationWindow {
         function onTreeLoaded() {
             toast.step("Drawing tree", 0.93)
             viewStack.currentIndex = 1
+            if (window.pendingRecent !== "") {
+               appBridge.addRecent(window.pendingRecent)
+               window.pendingRecent = ""
+            }
         }
         function onErrorOccurred(message) {
+            window.pendingRecent = ""
             toast.fail("Couldn't complete that")
             errorDialog.text = message
             errorDialog.open()
@@ -101,7 +126,7 @@ ApplicationWindow {
             "Nexus Files (*.nexus *.nex)",
             "All files (*)"
         ]
-        onAccepted: treeModel.loadFile(selectedFile)
+        onAccepted: window.openTreeUrl(selectedFile)
     }
 
     FileDialog {
@@ -330,9 +355,68 @@ ApplicationWindow {
 
     // ------------------------------------------------------------------ MENUS
     Menu {
-        id: fileMenu
-        MenuItem { text: "Open Tree File…"; onTriggered: openFileDialog.open() }
-        MenuItem { text: "Load Example Tree"; onTriggered: treeModel.loadExample() }
+       id: fileMenu
+       onAboutToShow: appBridge.refreshRecent()
+       delegate: MenuItem {
+           id: mi
+           arrow: Text {
+               visible: mi.subMenu
+               text: "›"
+               font.pixelSize: 15
+               color: mi.enabled ? "#1c2128" : "#a0a7b0"
+               x: mi.mirrored ? mi.padding : mi.width - width - mi.padding
+               y: mi.topPadding + (mi.availableHeight - height) / 2
+           }
+       }
+       MenuItem { text: "Open Tree File…"; onTriggered: openFileDialog.open() }
+       Menu {
+           id: recentMenu
+           title: "Open Recent"
+           property real wanted: 280
+           width: Math.min(wanted, window.width - 40)
+
+           function recalc() {
+               var w = 280
+               for (var i = 0; i < count; i++) {
+                   var it = itemAt(i)
+                   if (it && it.visible) w = Math.max(w, it.implicitWidth)
+               }
+               wanted = w
+           }
+
+           Instantiator {
+               model: appBridge.recentFiles
+               delegate: MenuItem {
+                   id: ri
+                   required property string modelData
+                   text: modelData
+                   contentItem: Text {
+                       text: ri.text
+                       font: ri.font
+                       color: ri.enabled ? "#1c2128" : "#a0a7b0"
+                       elide: Text.ElideMiddle
+                       verticalAlignment: Text.AlignVCenter
+                   }
+                   onTriggered: window.openTreePath(modelData)
+               }
+               onObjectAdded: (index, object) => { recentMenu.insertItem(index, object); recentMenu.recalc() }
+               onObjectRemoved: (index, object) => { recentMenu.removeItem(object); recentMenu.recalc() }
+           }
+           MenuItem {
+               text: "No recent files"
+               enabled: false
+               visible: appBridge.recentFiles.length === 0
+               height: visible ? implicitHeight : 0
+           }
+           MenuSeparator { visible: appBridge.recentFiles.length > 0; height: visible ? implicitHeight : 0 }
+           MenuItem {
+               text: "Clear Recent Files"
+               visible: appBridge.recentFiles.length > 0
+               height: visible ? implicitHeight : 0
+               onTriggered: appBridge.clearRecent()
+           }
+       }
+       MenuItem { text: "Load Example Tree"; onTriggered: treeModel.loadExample() }
         MenuSeparator {}
         MenuItem { text: "Import Metadata…"; enabled: window.hasTree; onTriggered: metadataDialog.open() }
         MenuSeparator {}
@@ -589,7 +673,7 @@ ApplicationWindow {
     DropArea {
         id: dropArea
         anchors.fill: parent
-        onDropped: (drop) => { if (drop.hasUrls) treeModel.loadFile(drop.urls[0]) }
+        onDropped: (drop) => { if (drop.hasUrls) window.openTreeUrl(drop.urls[0]) }
     }
 
     Rectangle {

@@ -15,7 +15,7 @@ jobs:
       matrix:
         os: [ubuntu-22.04, windows-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: jurplel/install-qt-action@v4
         with:
           version: 6.10.*
@@ -44,7 +44,29 @@ jobs:
           New-Item -ItemType Directory -Force dist/Cladescope | Out-Null
           Copy-Item $exe.FullName dist/Cladescope/
           windeployqt --release --qmldir . "dist/Cladescope/$($exe.Name)"
+          # App-local copy of the Visual C++ runtime so the zip also runs on PCs without the redistributable
+          foreach ($d in 'vcruntime140.dll','vcruntime140_1.dll','msvcp140.dll','msvcp140_1.dll','msvcp140_2.dll','concrt140.dll') {
+            $f = Join-Path $env:SystemRoot "System32\$d"
+            if (Test-Path $f) { Copy-Item $f dist/Cladescope/ }
+          }
+          Get-ChildItem dist/Cladescope/platforms | Format-Table Name, Length
           Compress-Archive -Path dist/Cladescope -DestinationPath "Cladescope-${{ steps.v.outputs.tag }}-windows-x64.zip"
+
+      - name: Smoke test (Windows)
+        if: runner.os == 'Windows'
+        continue-on-error: true   # warning only until this has proven reliable on the runner
+        shell: pwsh
+        run: |
+          # Start the packaged app with a stripped PATH (no Qt on it) and check the real window opens
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          Remove-Item Env:QT_PLUGIN_PATH, Env:QT_QPA_PLATFORM_PLUGIN_PATH -ErrorAction SilentlyContinue
+          $exe = (Get-ChildItem dist/Cladescope -Filter *.exe | Select-Object -First 1).FullName
+          $p = Start-Process -FilePath $exe -ArgumentList (Resolve-Path tests/data/small.nwk) -PassThru
+          Start-Sleep -Seconds 10
+          $p.Refresh()
+          Write-Host "Window title: '$($p.MainWindowTitle)'  exited: $($p.HasExited)"
+          if ($p.HasExited -or $p.MainWindowTitle -notlike '*small.nwk*') { Write-Error "App did not open its main window"; exit 1 }
+          Stop-Process -Id $p.Id -Force
 
       - name: Package (macOS)
         if: runner.os == 'macOS'
@@ -71,12 +93,12 @@ jobs:
           cmake --install build
           BIN=$(find install -type f -perm -u+x -name 'Cladescope' -o -type f -perm -u+x -name 'cladescope' | head -n1)
           mkdir -p AppDir/usr/bin AppDir/usr/share/applications
-          cp "$BIN" AppDir/usr/bin/cladescope
+          cp "$BIN" AppDir/usr/bin/Cladescope
           cat > AppDir/usr/share/applications/cladescope.desktop << 'DESK'
           [Desktop Entry]
           Type=Application
           Name=Cladescope
-          Exec=cladescope
+          Exec=Cladescope
           Icon=cladescope
           Categories=Education;Science;Biology;
           DESK
@@ -95,10 +117,10 @@ jobs:
           ./linuxdeploy-x86_64.AppImage --appdir AppDir \
             --desktop-file AppDir/usr/share/applications/cladescope.desktop \
             --icon-file "$ICON_DIR/cladescope.png" \
-            --executable AppDir/usr/bin/cladescope --plugin qt --output appimage
+            --executable AppDir/usr/bin/Cladescope --plugin qt --output appimage
           ls -l *.AppImage
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: package-${{ runner.os }}
           path: |
@@ -110,7 +132,7 @@ jobs:
     needs: package
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           path: assets
           merge-multiple: true
@@ -118,7 +140,7 @@ jobs:
         working-directory: assets
         run: sha256sum Cladescope-* > SHA256SUMS.txt
       - name: Draft release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           draft: true
           generate_release_notes: true

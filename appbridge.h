@@ -3,6 +3,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QStringList>
 
 class QQuickWindow;
 
@@ -19,6 +20,7 @@ class AppBridge : public QObject {
     Q_PROPERTY(bool canGpuCanvas READ canGpuCanvas NOTIFY infoChanged)
     Q_PROPERTY(QString backendPref READ backendPref NOTIFY prefChanged)
     Q_PROPERTY(QString startupFile READ startupFile CONSTANT)
+    Q_PROPERTY(QStringList recentFiles READ recentFiles NOTIFY recentChanged)
 
 public:
     explicit AppBridge(const QString &startupFile = QString(), QObject *parent = nullptr);
@@ -47,9 +49,19 @@ public:
     // write a Newick string to a temp file and open it in a new app instance
     Q_INVOKABLE bool openNewWindow(const QString &newick, const QString &name);
 
+    //recent files...
+    QStringList recentFiles() const;
+    Q_INVOKABLE void addRecent(const QString &path);
+    Q_INVOKABLE void removeRecent(const QString &path);
+    Q_INVOKABLE void clearRecent();
+    Q_INVOKABLE void refreshRecent() { emit recentChanged(); }
+    Q_INVOKABLE bool fileExists(const QString &path) const;
+    Q_INVOKABLE bool openFileInNewWindow(const QString &path);
+
 signals:
     void infoChanged();
     void prefChanged();
+    void recentChanged();
 
 private:
     void updateInfo(const QString &api, const QString &gpu);

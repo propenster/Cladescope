@@ -61,12 +61,12 @@ if(APPLE)
     target_sources(cladescope PRIVATE ${CLADESCOPE_ICNS})
     set_source_files_properties(${CLADESCOPE_ICNS} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
     set_target_properties(cladescope PROPERTIES
-        OUTPUT_NAME "Cladescope"
         MACOSX_BUNDLE_ICON_FILE cladescope.icns
         MACOSX_BUNDLE_BUNDLE_NAME "Cladescope")
 endif()
 
 set_target_properties(cladescope PROPERTIES
+    OUTPUT_NAME "Cladescope"
     MACOSX_BUNDLE_GUI_IDENTIFIER com.cladescope.app
     MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
     MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}

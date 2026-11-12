@@ -41,8 +41,8 @@ Download the package for your system from the [Releases page](../../releases):
 
 | System | File | Notes |
 |---|---|---|
-| Windows | `Cladescope-<version>-windows-x64.zip` | Unzip and run `cladescope.exe`. |
-| macOS | `Cladescope-<version>-macos.dmg` | Not code-signed: right-click the app and choose Open the first time. |
+| Windows | `Cladescope-<version>-windows-x64.zip` | Unzip and run `Cladescope.exe`. |
+| macOS | `Cladescope-<version>-macos-arm64.dmg` | Not notarized, see the note below. |
 | Linux | `Cladescope-<version>-linux-x86_64.AppImage` | `chmod +x` it and run. |
 
 **macOS:** Cladescope isn't notarized yet. After dragging it to Applications, run

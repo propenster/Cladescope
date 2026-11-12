@@ -150,6 +150,28 @@ Rectangle {
         }
     }
 
+    component ModernComboBox: ComboBox {
+        id: cbx
+        delegate: ItemDelegate {
+            id: dlg
+            required property int index
+            width: cbx.width
+            height: 32
+            highlighted: cbx.highlightedIndex === index
+            hoverEnabled: cbx.hoverEnabled
+            contentItem: Text {
+                text: cbx.textAt(dlg.index)
+                color: "#1c2128"
+                font: cbx.font
+                elide: Text.ElideRight
+                verticalAlignment: Text.AlignVCenter
+            }
+            background: Rectangle {
+                color: dlg.highlighted ? "#e3ecfd" : "transparent"
+            }
+        }
+    }
+
     // ---------------------------------------------------------------- content
     ScrollView {
         id: scroll
@@ -165,7 +187,7 @@ Rectangle {
 
             // ------------------------------------------------------ LAYOUT
             SectionHeader { text: "Layout"; Layout.topMargin: 0 }
-            ComboBox {
+            ModernComboBox {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 35
                 font.family: root.settings ? root.settings.appFont : "sans-serif"
@@ -196,7 +218,7 @@ Rectangle {
             RowLayout {
                 Layout.fillWidth: true
                 Caption { text: "Order"; Layout.fillWidth: true }
-                ComboBox {
+                ModernComboBox {
                     implicitWidth: 150
                     font.family: root.settings ? root.settings.appFont : "sans-serif"
                     font.pixelSize: 12
@@ -249,7 +271,7 @@ Rectangle {
             RowLayout {
                 Layout.fillWidth: true
                 Caption { text: "Tree font"; Layout.fillWidth: true }
-                ComboBox {
+                ModernComboBox {
                     id: fontCombo
                     implicitWidth: 170
                     font.family: root.settings ? root.settings.appFont : "sans-serif"
@@ -337,7 +359,7 @@ Rectangle {
             RowLayout {
                 Layout.fillWidth: true
                 Caption { text: "Source"; Layout.fillWidth: true }
-                ComboBox {
+                ModernComboBox {
                     id: sourceCombo
                     implicitWidth: 170
                     Layout.preferredHeight: 35
@@ -409,7 +431,7 @@ Rectangle {
                 Layout.fillWidth: true
                 Layout.topMargin: 4
                 Caption { text: "Split names by"; Layout.fillWidth: true }
-                ComboBox {
+                ModernComboBox {
                     id: delimCombo
                     implicitWidth: 150
                     Layout.preferredHeight: 35
