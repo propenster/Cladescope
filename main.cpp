@@ -48,6 +48,16 @@ int main(int argc, char *argv[])
     p.setColor(QPalette::PlaceholderText, "#6b7480");
     p.setColor(QPalette::ToolTipBase,     "#1c2128");
     p.setColor(QPalette::ToolTipText,     "#ffffff");
+    const QColor disabledText("#a0a7b0");
+    p.setColor(QPalette::Disabled, QPalette::WindowText, disabledText);
+    p.setColor(QPalette::Disabled, QPalette::Text,       disabledText);
+    p.setColor(QPalette::Disabled, QPalette::ButtonText, disabledText);
+    p.setColor(QPalette::Disabled, QPalette::Mid,        disabledText);
+    p.setColor(QPalette::Disabled, QPalette::Base,       "#f6f7f9");
+    p.setColor(QPalette::Disabled, QPalette::Button,     "#eef1f5");
+    p.setColor(QPalette::Disabled, QPalette::Window,     "#ffffff");
+    p.setColor(QPalette::Disabled, QPalette::Highlight,  "#d9dde3");
+    p.setColor(QPalette::Disabled, QPalette::HighlightedText, disabledText);
     app.setPalette(p);
 
     QQmlApplicationEngine engine;
