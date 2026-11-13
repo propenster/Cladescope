@@ -6,6 +6,8 @@
 #include "tree.h"
 #include "appbridge.h"
 #include <QIcon>
+#include <QPalette>
+#include <QStyleHints>
 
 int main(int argc, char *argv[])
 {
@@ -28,6 +30,25 @@ int main(int argc, char *argv[])
     const QStringList args = app.arguments();
     if (args.size() > 1 && QFileInfo::exists(args.at(1)))
         startFile = QFileInfo(args.at(1)).absoluteFilePath();
+
+    app.styleHints()->setColorScheme(Qt::ColorScheme::Light);
+    QPalette p;
+    p.setColor(QPalette::Window,          "#ffffff");
+    p.setColor(QPalette::WindowText,      "#1c2128");
+    p.setColor(QPalette::Base,            "#ffffff");
+    p.setColor(QPalette::AlternateBase,   "#f6f7f9");
+    p.setColor(QPalette::Text,            "#1c2128");
+    p.setColor(QPalette::Button,          "#eef1f5");
+    p.setColor(QPalette::ButtonText,      "#1c2128");
+    p.setColor(QPalette::Highlight,       "#2f6fed");
+    p.setColor(QPalette::HighlightedText, "#ffffff");
+    p.setColor(QPalette::Mid,             "#d9dde3");
+    p.setColor(QPalette::Dark,            "#b9c0c9");
+    p.setColor(QPalette::Light,           "#ffffff");
+    p.setColor(QPalette::PlaceholderText, "#6b7480");
+    p.setColor(QPalette::ToolTipBase,     "#1c2128");
+    p.setColor(QPalette::ToolTipText,     "#ffffff");
+    app.setPalette(p);
 
     QQmlApplicationEngine engine;
     qmlRegisterType<TreeModel>("com.cladescope.backend", 1, 0, "TreeModel");

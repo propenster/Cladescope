@@ -14,23 +14,6 @@ ApplicationWindow {
     visible: true
     title: "Cladescope" + (treeModel.fileName !== "" ? " — " + treeModel.fileName : "")
     color: "#f6f7f9"
-    palette {
-        window: "#ffffff"
-        windowText: "#1c2128"
-        base: "#ffffff"
-        alternateBase: "#f6f7f9"
-        text: "#1c2128"
-        button: "#eef1f5"
-        buttonText: "#1c2128"
-        highlight: "#2f6fed"
-        highlightedText: "#ffffff"
-        mid: "#d9dde3"
-        dark: "#b9c0c9"
-        light: "#ffffff"
-        placeholderText: "#6b7480"
-        toolTipBase: "#1c2128"
-        toolTipText: "#ffffff"
-    }
 
     readonly property bool hasTree: treeModel.fileName !== ""
     readonly property var vs: viewer.settings
@@ -67,6 +50,28 @@ ApplicationWindow {
         treeModel.loadPath(path)
     }
     function openTreeUrl(url) { window.openTreePath(treeModel.localPath(url)) }
+
+    component ModernComboBox: ComboBox {
+        id: cbx
+        delegate: ItemDelegate {
+            id: dlg
+            required property int index
+            width: cbx.width
+            height: 32
+            highlighted: cbx.highlightedIndex === index
+            hoverEnabled: cbx.hoverEnabled
+            contentItem: Text {
+                text: cbx.textAt(dlg.index)
+                color: "#1c2128"
+                font: cbx.font
+                elide: Text.ElideRight
+                verticalAlignment: Text.AlignVCenter
+            }
+            background: Rectangle {
+                color: dlg.highlighted ? "#e3ecfd" : "transparent"
+            }
+        }
+    }
 
     // ------------------------------------------------------------ C++ BACKEND
     TreeModel { id: treeModel }
@@ -169,7 +174,7 @@ ApplicationWindow {
             RowLayout {
                 Layout.fillWidth: true
                 Label { text: "Format"; Layout.preferredWidth: 90 }
-                ComboBox {
+                ModernComboBox {
                     id: fmtCombo
                     Layout.fillWidth: true
                     model: ["SVG — editable vector (Illustrator, Inkscape)",
@@ -181,7 +186,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 visible: exportDialog.fmt === "png"
                 Label { text: "Resolution"; Layout.preferredWidth: 90 }
-                ComboBox {
+                ModernComboBox {
                     id: scaleCombo
                     Layout.fillWidth: true
                     model: ["1×  (screen)", "2×  (sharp)", "3×  (print)", "4×  (large print)"]
@@ -314,7 +319,7 @@ ApplicationWindow {
             Rectangle { Layout.fillWidth: true; height: 1; color: "#e9ecef" }
 
             Label { text: "Graphics backend (applied on next start)"; font.bold: true }
-            ComboBox {
+            ModernComboBox {
                 id: backendCombo
                 Layout.fillWidth: true
                 model: ["Automatic (Qt default for this OS)",

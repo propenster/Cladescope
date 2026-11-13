@@ -2153,9 +2153,31 @@ Item {
             cursorShape: Qt.PointingHandCursor
             onClicked: chip.clicked()
         }
-        ToolTip.visible: chip.tip !== "" && chipMa.containsMouse
-        ToolTip.text: chip.tip
-        ToolTip.delay: 450
+        // ToolTip.visible: chip.tip !== "" && chipMa.containsMouse
+        // ToolTip.text: chip.tip
+        // ToolTip.delay: 450
+        ToolTip {
+            id: tt
+            visible: chip.tip !== "" && chipMa.containsMouse
+            text: chip.tip
+            delay: 450
+            popupType: Popup.Item
+            padding: 6
+            width: Math.min(implicitWidth, 260)
+            x: -width - 8
+            y: (chip.height - height) / 2
+
+            contentItem: Text {
+                text: tt.text
+                color: "#ffffff"
+                font.pixelSize: 12
+                wrapMode: Text.WordWrap
+            }
+            background: Rectangle {
+                color: "#1c2128"
+                radius: 4
+            }
+        }
     }
 
     Column {
