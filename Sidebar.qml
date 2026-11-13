@@ -79,6 +79,12 @@ Rectangle {
             }
         }
     }
+    component ModernTextField: TextField {
+        color: "#1c2128"
+        placeholderTextColor: "#6b7480"
+        selectionColor: "#2f6fed"
+        selectedTextColor: "#ffffff"
+    }
 
     component ModernSlider: Slider {
         id: slider
@@ -380,7 +386,7 @@ Rectangle {
                 Layout.fillWidth: true
             }
 
-            TextField {
+            ModernTextField {
                 id: regexField
                 Layout.fillWidth: true
                 font.pixelSize: 12
@@ -459,6 +465,15 @@ Rectangle {
                     Layout.preferredHeight: 35
                     from: 1; to: 20; value: 2
                     editable: true
+                    contentItem: TextInput {
+                            text: indexSpinBox.textFromValue(indexSpinBox.value, indexSpinBox.locale)
+                            color: "#1c2128"
+                            horizontalAlignment: Qt.AlignHCenter
+                            verticalAlignment: Qt.AlignVCenter
+                            readOnly: !indexSpinBox.editable
+                            validator: indexSpinBox.validator
+                            inputMethodHints: Qt.ImhFormattedNumbersOnly
+                        }
                 }
             }
 
@@ -511,7 +526,7 @@ Rectangle {
 
             RowLayout {
                 Layout.fillWidth: true
-                TextField {
+                ModernTextField {
                     id: searchField
                     Layout.fillWidth: true
                     font.pixelSize: 13
