@@ -72,6 +72,16 @@ ApplicationWindow {
             }
         }
     }
+    component ModernMenuItem: MenuItem {
+        id: mmi
+        contentItem: Text {
+            text: mmi.text
+            font: mmi.font
+            color: mmi.enabled ? "#1c2128" : "#a0a7b0"
+            elide: Text.ElideRight
+            verticalAlignment: Text.AlignVCenter
+        }
+    }
 
     // ------------------------------------------------------------ C++ BACKEND
     TreeModel { id: treeModel }
@@ -373,7 +383,7 @@ ApplicationWindow {
                y: mi.topPadding + (mi.availableHeight - height) / 2
            }
        }
-       MenuItem { text: "Open Tree File…"; onTriggered: openFileDialog.open() }
+       ModernMenuItem { text: "Open Tree File…"; onTriggered: openFileDialog.open() }
        Menu {
            id: recentMenu
            title: "Open Recent"
@@ -407,78 +417,78 @@ ApplicationWindow {
                onObjectAdded: (index, object) => { recentMenu.insertItem(index, object); recentMenu.recalc() }
                onObjectRemoved: (index, object) => { recentMenu.removeItem(object); recentMenu.recalc() }
            }
-           MenuItem {
+           ModernMenuItem {
                text: "No recent files"
                enabled: false
                visible: appBridge.recentFiles.length === 0
                height: visible ? implicitHeight : 0
            }
            MenuSeparator { visible: appBridge.recentFiles.length > 0; height: visible ? implicitHeight : 0 }
-           MenuItem {
+           ModernMenuItem {
                text: "Clear Recent Files"
                visible: appBridge.recentFiles.length > 0
                height: visible ? implicitHeight : 0
                onTriggered: appBridge.clearRecent()
            }
        }
-       MenuItem { text: "Load Example Tree"; onTriggered: treeModel.loadExample() }
+       ModernMenuItem { text: "Load Example Tree"; onTriggered: treeModel.loadExample() }
         MenuSeparator {}
-        MenuItem { text: "Import Metadata…"; enabled: window.hasTree; onTriggered: metadataDialog.open() }
+        ModernMenuItem { text: "Import Metadata…"; enabled: window.hasTree; onTriggered: metadataDialog.open() }
         MenuSeparator {}
-        MenuItem { text: "Save as Newick…"; enabled: window.hasTree; onTriggered: saveNewickDialog.open() }
-        MenuItem { text: "Export Figure (SVG / PDF / PNG)…"; enabled: window.hasTree; onTriggered: exportDialog.open() }
-        MenuItem { text: "Export Current View as PNG…"; enabled: window.hasTree; onTriggered: exportImageDialog.open() }
+        ModernMenuItem { text: "Save as Newick…"; enabled: window.hasTree; onTriggered: saveNewickDialog.open() }
+        ModernMenuItem { text: "Export Figure (SVG / PDF / PNG)…"; enabled: window.hasTree; onTriggered: exportDialog.open() }
+        ModernMenuItem { text: "Export Current View as PNG…"; enabled: window.hasTree; onTriggered: exportImageDialog.open() }
         MenuSeparator {}
-        MenuItem { text: "Exit"; onTriggered: Qt.quit() }
+        ModernMenuItem { text: "Exit"; onTriggered: Qt.quit() }
     }
 
     Menu {
         id: layoutMenu
-        MenuItem { text: "Rectangular cladogram"; onTriggered: window.setLayout("rectangular", false) }
-        MenuItem { text: "Rectangular phylogram"; onTriggered: window.setLayout("rectangular", true) }
-        MenuItem { text: "Slanted cladogram"; onTriggered: window.setLayout("slanted", false) }
-        MenuItem { text: "Circular phylogram"; onTriggered: window.setLayout("circular", true) }
-        MenuItem { text: "Circular cladogram"; onTriggered: window.setLayout("circular", false) }
-        MenuItem { text: "Radial (unrooted) phylogram"; onTriggered: window.setLayout("radial", true) }
+        ModernMenuItem { text: "Rectangular cladogram"; onTriggered: window.setLayout("rectangular", false) }
+        ModernMenuItem { text: "Rectangular phylogram"; onTriggered: window.setLayout("rectangular", true) }
+        ModernMenuItem { text: "Slanted cladogram"; onTriggered: window.setLayout("slanted", false) }
+        ModernMenuItem { text: "Circular phylogram"; onTriggered: window.setLayout("circular", true) }
+        ModernMenuItem { text: "Circular cladogram"; onTriggered: window.setLayout("circular", false) }
+        ModernMenuItem { text: "Radial (unrooted) phylogram"; onTriggered: window.setLayout("radial", true) }
     }
 
     Menu {
         id: treeMenu
-        MenuItem { text: "Midpoint root"; enabled: window.hasTree; onTriggered: viewer.midpointRoot() }
-        MenuItem { text: "Reroot on selected branch"; enabled: viewer.canEditSelection; onTriggered: viewer.rerootSelected() }
+        ModernMenuItem { text: "Midpoint root"; enabled: window.hasTree; onTriggered: viewer.midpointRoot() }
+        ModernMenuItem { text: "Reroot on selected branch"; enabled: viewer.canEditSelection; onTriggered: viewer.rerootSelected() }
         MenuSeparator {}
-        MenuItem { text: "Highlight selected clade…"; enabled: viewer.canEditSelection; onTriggered: viewer.highlightSelected() }
-        MenuItem { text: "Clear all highlights"; enabled: window.hasTree; onTriggered: viewer.clearHighlights() }
+        ModernMenuItem { text: "Highlight selected clade…"; enabled: viewer.canEditSelection; onTriggered: viewer.highlightSelected() }
+        ModernMenuItem { text: "Clear all highlights"; enabled: window.hasTree; onTriggered: viewer.clearHighlights() }
         MenuSeparator {}
-        MenuItem { text: "Extract selected clade"; enabled: viewer.selectionIsClade; onTriggered: viewer.extractSelected() }
-        MenuItem { text: "Open selected clade in new window"; enabled: viewer.selectionIsClade
+        ModernMenuItem { text: "Extract selected clade"; enabled: viewer.selectionIsClade; onTriggered: viewer.extractSelected() }
+        ModernMenuItem { text: "Open selected clade in new window"; enabled: viewer.selectionIsClade
                    onTriggered: viewer.openCladeInNewWindow(viewer.selectedNode) }
         MenuSeparator {}
-        MenuItem { text: "Undo   (Ctrl+Z)"; enabled: viewer.canUndo; onTriggered: viewer.undo() }
+        ModernMenuItem { text: "Undo   (Ctrl+Z)"; enabled: viewer.canUndo; onTriggered: viewer.undo() }
     }
 
     Menu {
         id: perfMenu
-        MenuItem {
+        ModernMenuItem {
             text: window.radio(vs.performanceMode, "Lighter drawing while panning / zooming")
             onTriggered: vs.performanceMode = !vs.performanceMode
         }
         MenuSeparator {}
-        MenuItem {
+        ModernMenuItem {
             text: window.radio(vs.renderMode === "auto", "Renderer: Auto (GPU for large trees)")
             onTriggered: vs.renderMode = "auto"
         }
-        MenuItem {
+        ModernMenuItem {
             text: window.radio(vs.renderMode === "gpu", "Renderer: Always GPU") + (appBridge.canGpuCanvas ? "" : "  (unavailable)")
             enabled: appBridge.canGpuCanvas
             onTriggered: vs.renderMode = "gpu"
         }
-        MenuItem {
+        ModernMenuItem {
             text: window.radio(vs.renderMode === "cpu", "Renderer: Always CPU")
             onTriggered: vs.renderMode = "cpu"
         }
         MenuSeparator {}
-        MenuItem { text: "Graphics info & backend…"; onTriggered: graphicsDialog.open() }
+        ModernMenuItem { text: "Graphics info & backend…"; onTriggered: graphicsDialog.open() }
     }
 
     Menu {
@@ -490,15 +500,15 @@ ApplicationWindow {
         MenuItem { text: "Color uniform clades"; checkable: true
                    checked: vs.colorBranches; onToggled: vs.colorBranches = checked }
         MenuSeparator {}
-        MenuItem { text: "Import metadata table…"; onTriggered: metadataDialog.open() }
+        ModernMenuItem { text: "Import metadata table…"; onTriggered: metadataDialog.open() }
     }
 
     Menu {
         id: settingsMenu
-        MenuItem { text: "Fit to window"; enabled: window.hasTree; onTriggered: vs.fitView() }
-        MenuItem { text: "Reset display options"; onTriggered: vs.reset() }
+        ModernMenuItem { text: "Fit to window"; enabled: window.hasTree; onTriggered: vs.fitView() }
+        ModernMenuItem { text: "Reset display options"; onTriggered: vs.reset() }
         MenuSeparator {}
-        MenuItem { text: "Keyboard & mouse…"; onTriggered: helpDialog.open() }
+        ModernMenuItem { text: "Keyboard & mouse…"; onTriggered: helpDialog.open() }
     }
 
     // ---------------------------------------------------------------- TOP BAR
